@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KML Boundary Extender</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- Leaflet Geoman CSS (For Manual Editing) -->
+    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .leaflet-control-zoom { border: none !important; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1) !important; }
+
+        /* Custom Drag Handle */
+        .drag-handle-icon {
+            background-color: #2563eb;
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: grab;
+        }
+        .drag-handle-icon:active {
+            cursor: grabbing;
+            background-color: #1d4ed8;
+        }
+        
+        /* Tooltip Style */
+        .handle-tooltip {
+            background-color: #1e293b;
+            border: none;
+            color: white;
+            font-weight: 600;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .handle-tooltip:before { border-right-color: #1e293b; }
+
+        /* Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #2563eb;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #2563eb;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex bg-gray-100">
+
+    <!-- Sidebar / Control Panel -->
+    <div class="absolute top-4 left-4 z-[1000] w-96 max-h-[calc(100vh-2rem)] flex flex-col gap-4">
+        
+        <!-- Main Controls -->
+        <div class="glass-panel rounded-xl shadow-2xl border border-white/20 p-6 flex flex-col gap-5 overflow-y-auto">
+            <div class="flex items-center justify-between">
+                <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-layer-group text-blue-600"></i> GeoBuffer
+                </h1>
+                <span class="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-700 rounded-full">Beta</span>
+            </div>
+
+            <!-- Upload Section -->
+            <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 hover:bg-blue-50 transition-colors cursor-pointer group">
+                <input type="file" id="file-input" accept=".kml" class="hidden">
+                <div class="flex flex-col items-center gap-2">
+                    <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+                    </div>
+                    <p class="text-sm font-medium text-slate-600">Click or Drag KML file here</p>
+                    <p class="text-xs text-slate-400">Polygons Only (Points ignored)</p>
+                </div>
+            </div>
+
+            <!-- Use Demo Data Button -->
+            <button id="btn-demo" class="text-xs text-blue-600 hover:text-blue-800 underline self-center -mt-2">
+                Or load demo polygon
+            </button>
+
+            <hr class="border-slate-200">
+
+            <!-- Buffer Controls -->
+            <div class="space-y-4 opacity-50 pointer-events-none transition-opacity" id="controls-section">
+                
+                <!-- Buffer Method -->
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-2">Expansion Method</label>
+                    <div class="flex bg-slate-100 p-1 rounded-lg">
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md shadow-sm bg-white text-slate-800 transition-all method-btn" data-method="buffer">
+                            <i class="fa-solid fa-bullseye mr-1"></i> Standard (GIS)
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all method-btn" data-method="scale">
+                            <i class="fa-solid fa-expand mr-1"></i> Same Shape
+                        </button>
+                    </div>
+                </div>
+
+                <!-- GIS Sub-Options (Base Shape) -->
+                <div id="gis-options-container">
+                    <label class="block text-sm font-medium text-slate-700 mb-2">Base Geometry</label>
+                    <div class="flex bg-slate-100 p-1 rounded-lg">
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md shadow-sm bg-white text-slate-800 transition-all base-shape-btn" data-shape="exact">
+                            Exact
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all base-shape-btn" data-shape="envelope">
+                            Envelope
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all base-shape-btn" data-shape="convex">
+                            Hull
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Distance Input -->
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Distance / Expansion</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="distance-input" value="100" class="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="0">
+                        <select id="unit-select" class="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none">
+                            <option value="meters">Meters</option>
+                            <option value="kilometers">Kilometers</option>
+                            <option value="feet">Feet</option>
+                            <option value="miles">Miles</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Slider -->
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="text-xs font-medium text-slate-500">Quick Adjust</label>
+                        <span id="slider-val" class="text-xs font-bold text-blue-600">100m</span>
+                    </div>
+                    <input type="range" id="distance-slider" min="0" max="1000" value="100" step="10" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                </div>
+
+                <!-- Corner Style -->
+                <div id="corner-style-container">
+                    <label class="block text-sm font-medium text-slate-700 mb-2">Corner Style</label>
+                    <div class="flex bg-slate-100 p-1 rounded-lg">
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md shadow-sm bg-white text-slate-800 transition-all join-btn" data-style="round">
+                            <i class="fa-solid fa-circle-notch mr-1"></i> Round
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all join-btn" data-style="sharp">
+                            <i class="fa-solid fa-play fa-rotate-270 mr-1" style="font-size: 8px;"></i> Sharp
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all join-btn" data-style="square">
+                            <i class="fa-solid fa-square-full mr-1" style="font-size: 8px;"></i> Square
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Manual Editing -->
+                <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <div class="bg-white p-1.5 rounded-md shadow-sm text-blue-600">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-xs font-bold text-slate-700">Edit Vertices</span>
+                                <span class="text-[10px] text-slate-500">Manually adjust shape</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Toggle -->
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="manual-edit-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 left-0 transition-all duration-300"/>
+                            <label for="manual-edit-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-300 cursor-pointer transition-colors duration-300"></label>
+                        </div>
+                    </div>
+                    <div id="manual-edit-warning" class="hidden mt-2 pt-2 border-t border-blue-100 text-[10px] text-blue-600">
+                        <i class="fa-solid fa-circle-info mr-1"></i> Drag vertices to move. Click edges to add points. Right-click points to delete.
+                    </div>
+                </div>
+
+                <!-- Naming Convention -->
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <label class="block text-xs font-bold text-slate-700 mb-2">Naming Convention</label>
+                    <div class="flex flex-col gap-2">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="name_mode" value="auto" checked class="text-blue-600 focus:ring-blue-500">
+                            <span class="text-xs text-slate-600">Auto (e.g. "79m BZ")</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="name_mode" value="static100" class="text-blue-600 focus:ring-blue-500">
+                            <span class="text-xs text-slate-600">Static "100m BZ"</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="name_mode" value="custom" class="text-blue-600 focus:ring-blue-500">
+                            <span class="text-xs text-slate-600">Custom Prefix</span>
+                        </label>
+                        <input type="text" id="custom-name-input" class="w-full mt-1 px-2 py-1.5 text-xs border border-slate-300 rounded hidden" placeholder="Enter name prefix (e.g. Zone A)">
+                    </div>
+                </div>
+
+                <!-- Extra Options -->
+                <div>
+                     <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="include-original" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300">
+                        <span class="text-xs font-medium text-slate-700">Include Original Geometry</span>
+                    </label>
+                </div>
+                
+                <!-- Stats (Detailed) -->
+                <div class="bg-slate-50 rounded-lg p-3 border border-slate-200 grid grid-cols-2 gap-y-3 gap-x-4">
+                    <div class="flex flex-col">
+                        <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Original Area</span>
+                        <span id="original-area-ha" class="text-xs font-semibold text-slate-700 leading-tight">-</span>
+                        <span id="original-area-sqm" class="text-[10px] text-slate-500 leading-tight">-</span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Buffer Area</span>
+                        <span id="new-area-ha" class="text-xs font-semibold text-blue-600 leading-tight">-</span>
+                        <span id="new-area-sqm" class="text-[10px] text-slate-500 leading-tight">-</span>
+                    </div>
+                    <div class="flex flex-col col-span-2 border-t border-slate-200 pt-2">
+                        <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Difference</span>
+                        <div class="flex items-baseline gap-2">
+                            <span id="diff-area-ha" class="text-sm font-bold text-green-600">-</span>
+                            <span id="diff-area-sqm" class="text-[10px] text-green-600 opacity-80">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="pt-2 flex gap-3">
+                    <button id="btn-download" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-medium py-2.5 rounded-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-download"></i> Download KML
+                    </button>
+                    <button id="btn-clear" class="w-10 flex items-center justify-center bg-white border border-slate-300 text-slate-500 rounded-lg hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Instructions/Status -->
+            <div id="status-msg" class="text-xs text-center text-slate-400 mt-2">
+                Ready to process
+            </div>
+        </div>
+        
+        <!-- Legend -->
+        <div class="glass-panel rounded-xl shadow-lg border border-white/20 p-4 w-48 ml-auto mr-auto md:ml-0 md:mr-0 hidden" id="legend">
+            <div class="flex items-center gap-2 mb-2">
+                <span class="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-sm"></span>
+                <span class="text-xs font-medium text-slate-700">Original</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-transparent border-2 border-blue-900"></span>
+                <span class="text-xs font-medium text-slate-700">Buffer Zone</span>
+            </div>
+            <div class="mt-2 text-[10px] text-slate-400 italic text-center" id="drag-hint">
+                Drag blue dot on map to resize
+            </div>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div id="map" class="flex-1 h-full w-full z-0 bg-slate-200"></div>
+
+    <!-- Libraries -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Leaflet Geoman -->
+    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    <script src="https://unpkg.com/@mapbox/togeojson/togeojson.js"></script>
+
+    <script>
+        // --- 1. Map Initialization ---
+        const map = L.map('map', { zoomControl: false }).setView([20.5937, 78.9629], 5);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' });
+        const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Esri' });
+        satellite.addTo(map);
+        L.control.layers({ "Satellite": satellite, "Street": osm }, null, { position: 'bottomright' }).addTo(map);
+
+        // Geoman Setup
+        map.pm.setGlobalOptions({
+            allowSelfIntersection: true,
+        });
+
+        // --- 2. State Management ---
+        const state = {
+            originalFileName: "polygon",
+            originalGeoJSON: null,
+            bufferedGeoJSON: null,
+            bufferDistance: 100,
+            bufferUnit: 'meters',
+            method: 'buffer', 
+            baseShape: 'exact',
+            edgeStyle: 'round',
+            namingMode: 'auto',
+            customName: '',
+            referencePoint: null,
+            originalBBoxWidth: 0,
+            isManualEditing: false
+        };
+
+        const layers = {
+            original: L.geoJSON(null, {
+                style: { color: "#3b82f6", weight: 2, fillOpacity: 0.1 }
+            }).addTo(map),
+            buffer: L.geoJSON(null, {
+                style: { color: "#00007f", weight: 2, dashArray: '5, 5', fillOpacity: 0, fillColor: 'transparent' }
+            }).addTo(map),
+            handle: L.layerGroup().addTo(map)
+        };
+
+        const handleIcon = L.divIcon({
+            className: 'drag-handle-icon',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        });
+
+        // --- 3. DOM Elements ---
+        const els = {
+            dropZone: document.getElementById('drop-zone'),
+            fileInput: document.getElementById('file-input'),
+            controls: document.getElementById('controls-section'),
+            distanceInput: document.getElementById('distance-input'),
+            distanceSlider: document.getElementById('distance-slider'),
+            unitSelect: document.getElementById('unit-select'),
+            
+            // Toggles
+            methodBtns: document.querySelectorAll('.method-btn'),
+            gisOptionsContainer: document.getElementById('gis-options-container'),
+            baseShapeBtns: document.querySelectorAll('.base-shape-btn'),
+            
+            cornerContainer: document.getElementById('corner-style-container'),
+            joinBtns: document.querySelectorAll('.join-btn'),
+            
+            // Manual Edit
+            manualEditToggle: document.getElementById('manual-edit-toggle'),
+            manualEditWarning: document.getElementById('manual-edit-warning'),
+            dragHint: document.getElementById('drag-hint'),
+            
+            // Actions
+            btnDownload: document.getElementById('btn-download'),
+            btnClear: document.getElementById('btn-clear'),
+            btnDemo: document.getElementById('btn-demo'),
+            status: document.getElementById('status-msg'),
+            sliderVal: document.getElementById('slider-val'),
+            legend: document.getElementById('legend'),
+            
+            // Stats
+            origHa: document.getElementById('original-area-ha'),
+            origSqm: document.getElementById('original-area-sqm'),
+            newHa: document.getElementById('new-area-ha'),
+            newSqm: document.getElementById('new-area-sqm'),
+            diffHa: document.getElementById('diff-area-ha'),
+            diffSqm: document.getElementById('diff-area-sqm'),
+            
+            // Naming & Options
+            nameRadios: document.getElementsByName('name_mode'),
+            customNameInput: document.getElementById('custom-name-input'),
+            includeOriginal: document.getElementById('include-original')
+        };
+
+        // --- 4. Event Listeners ---
+        els.dropZone.addEventListener('click', () => els.fileInput.click());
+        els.dropZone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropZone.classList.add('border-blue-500', 'bg-blue-50'); });
+        els.dropZone.addEventListener('dragleave', () => els.dropZone.classList.remove('border-blue-500', 'bg-blue-50'));
+        els.dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            els.dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.toLowerCase().endsWith('.kml')) processFile(file);
+            else showStatus('Invalid file. Please upload a .kml file', true);
+        });
+        els.fileInput.addEventListener('change', (e) => { if (e.target.files[0]) processFile(e.target.files[0]); });
+
+        els.btnDemo.addEventListener('click', loadDemoData);
+        els.btnDownload.addEventListener('click', downloadCustomKML);
+        els.btnClear.addEventListener('click', resetApp);
+
+        // Inputs
+        els.distanceInput.addEventListener('input', (e) => {
+            state.bufferDistance = parseFloat(e.target.value) || 0;
+            els.distanceSlider.value = state.bufferDistance;
+            updateBuffer();
+        });
+        
+        els.distanceSlider.addEventListener('input', (e) => {
+            state.bufferDistance = parseFloat(e.target.value);
+            els.distanceInput.value = state.bufferDistance;
+            updateBuffer();
+        });
+
+        els.unitSelect.addEventListener('change', (e) => {
+            state.bufferUnit = e.target.value;
+            syncSliderRange();
+            updateBuffer();
+        });
+
+        // Method Toggle
+        els.methodBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget;
+                els.methodBtns.forEach(b => {
+                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.add('text-slate-500');
+                });
+                target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                target.classList.remove('text-slate-500');
+
+                state.method = target.dataset.method;
+                
+                if(state.method === 'scale') {
+                    els.gisOptionsContainer.classList.add('hidden');
+                    els.cornerContainer.classList.add('hidden');
+                } else {
+                    els.gisOptionsContainer.classList.remove('hidden');
+                    els.cornerContainer.classList.remove('hidden');
+                }
+                updateBuffer();
+            });
+        });
+
+        // Base Shape Toggle
+        els.baseShapeBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget;
+                els.baseShapeBtns.forEach(b => {
+                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.add('text-slate-500');
+                });
+                target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                target.classList.remove('text-slate-500');
+                
+                state.baseShape = target.dataset.shape;
+                updateBuffer();
+            });
+        });
+
+        // Edge Style Toggle
+        els.joinBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget; 
+                els.joinBtns.forEach(b => {
+                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.add('text-slate-500');
+                });
+                target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                target.classList.remove('text-slate-500');
+
+                state.edgeStyle = target.dataset.style;
+                updateBuffer();
+            });
+        });
+
+        // Naming Convention Toggle
+        els.nameRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                state.namingMode = e.target.value;
+                if (state.namingMode === 'custom') {
+                    els.customNameInput.classList.remove('hidden');
+                } else {
+                    els.customNameInput.classList.add('hidden');
+                }
+            });
+        });
+        els.customNameInput.addEventListener('input', (e) => {
+            state.customName = e.target.value;
+        });
+
+        // Manual Edit Toggle
+        els.manualEditToggle.addEventListener('change', (e) => {
+            state.isManualEditing = e.target.checked;
+            toggleEditMode();
+        });
+
+
+        // --- 5. Core Logic ---
+
+        function processFile(file) {
+            state.originalFileName = file.name.replace('.kml', '');
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parser = new DOMParser();
+                    const kml = parser.parseFromString(e.target.result, 'text/xml');
+                    const geojson = toGeoJSON.kml(kml);
+                    
+                    const polygons = geojson.features.filter(f => f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
+
+                    if (polygons.length === 0) {
+                        throw new Error("No Polygons found in KML (Points ignored)");
+                    }
+
+                    const cleanGeoJSON = turf.featureCollection(polygons);
+                    loadGeoJSON(cleanGeoJSON);
+                    showStatus(`Loaded: ${file.name} (${polygons.length} polygons)`);
+                } catch (err) {
+                    showStatus("Error: " + err.message, true);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadDemoData() {
+            state.originalFileName = "Demo_Polygon";
+            // Create a simpler square for better "Sharp" vs "Round" demo
+            const polygon = turf.polygon([[
+                [77.2090, 28.6139], 
+                [77.2200, 28.6139], 
+                [77.2200, 28.6250], 
+                [77.2090, 28.6250], 
+                [77.2090, 28.6139]
+            ]], { name: "Demo Polygon" });
+            loadGeoJSON(turf.featureCollection([polygon]));
+        }
+
+        function loadGeoJSON(geojson) {
+            state.originalGeoJSON = geojson;
+            els.controls.classList.remove('opacity-50', 'pointer-events-none');
+            els.legend.classList.remove('hidden');
+
+            layers.original.clearLayers();
+            layers.original.addData(state.originalGeoJSON);
+            
+            const bounds = layers.original.getBounds();
+            if(bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
+
+            // Setup Reference for Drag Handle
+            const firstPoly = state.originalGeoJSON.features[0];
+            const coords = turf.getCoords(firstPoly);
+            const rawPt = (firstPoly.geometry.type === 'MultiPolygon') ? coords[0][0][0] : coords[0][0];
+            state.referencePoint = turf.point(rawPt);
+            
+            const center = turf.centroid(firstPoly);
+            state.referenceBearing = turf.bearing(center, state.referencePoint);
+
+            // Calculate Approximate Width for Scaling Logic
+            const bbox = turf.bbox(state.originalGeoJSON); 
+            const pt1 = turf.point([bbox[0], bbox[1]]);
+            const pt2 = turf.point([bbox[2], bbox[1]]);
+            state.originalBBoxWidth = turf.distance(pt1, pt2, { units: 'meters' });
+
+            updateBuffer();
+        }
+
+        function updateBuffer() {
+            if (!state.originalGeoJSON) return;
+
+            try {
+                // UI Sync
+                els.sliderVal.innerText = `${Math.round(state.bufferDistance)} ${getUnitAbbr(state.bufferUnit)}`;
+                
+                let bufferedFeatures = [];
+
+                if (state.method === 'scale') {
+                    // --- SCALE METHOD ---
+                    let distMeters = state.bufferDistance;
+                    if(state.bufferUnit === 'kilometers') distMeters *= 1000;
+                    if(state.bufferUnit === 'miles') distMeters *= 1609.34;
+                    if(state.bufferUnit === 'feet') distMeters *= 0.3048;
+
+                    const width = state.originalBBoxWidth || 1; 
+                    const scaleFactor = (width + (2 * distMeters)) / width;
+                    
+                    const scaled = turf.transformScale(state.originalGeoJSON, scaleFactor);
+                    bufferedFeatures = scaled.features;
+
+                } else {
+                    // --- STANDARD BUFFER METHOD ---
+                    // 1. Determine Base Geometry
+                    const baseGeoms = state.originalGeoJSON.features.map(f => {
+                         if (state.baseShape === 'envelope') {
+                             return turf.bboxPolygon(turf.bbox(f));
+                         } else if (state.baseShape === 'convex') {
+                             const hull = turf.convex(f);
+                             return hull ? hull : f; 
+                         }
+                         return f; // Exact
+                    });
+
+                    // 2. Buffer each
+                    let steps = 64;
+                    if (state.edgeStyle === 'sharp') steps = 3;
+                    if (state.edgeStyle === 'square') steps = 1;
+
+                    bufferedFeatures = baseGeoms.map(geom => {
+                        return turf.buffer(geom, state.bufferDistance, {
+                            units: state.bufferUnit,
+                            steps: steps
+                        });
+                    });
+                }
+
+                // Combine into collection
+                state.bufferedGeoJSON = turf.featureCollection(bufferedFeatures);
+
+                // Render Map
+                layers.buffer.clearLayers();
+                layers.buffer.addData(state.bufferedGeoJSON);
+                
+                // Re-apply editing if active (because we just wiped the layer)
+                if (state.isManualEditing) {
+                    enableGeomanOnLayer();
+                }
+
+                calculateStats();
+                updateDragHandle();
+
+            } catch (err) {
+                console.error("Buffer Error", err);
+            }
+        }
+        
+        // Separate stats calc to allow manual edits to trigger it without regenerating buffer
+        function calculateStats() {
+             if(!state.originalGeoJSON || !state.bufferedGeoJSON) return;
+             
+             const origSqM = turf.area(state.originalGeoJSON);
+             const newSqM = turf.area(state.bufferedGeoJSON);
+             const diffSqM = newSqM - origSqM;
+
+             updateStatsUI(origSqM, newSqM, diffSqM);
+        }
+
+        function updateStatsUI(orig, newArea, diff) {
+            const fmt = (n) => Math.round(n).toLocaleString() + " m²";
+            els.origHa.innerText = toHectares(orig);
+            els.origSqm.innerText = fmt(orig);
+            els.newHa.innerText = toHectares(newArea);
+            els.newSqm.innerText = fmt(newArea);
+            els.diffHa.innerText = "+" + toHectares(diff);
+            els.diffSqm.innerText = "+" + fmt(diff);
+        }
+        
+        // --- Manual Editing Logic ---
+        function toggleEditMode() {
+            if (state.isManualEditing) {
+                // Enabled
+                els.manualEditWarning.classList.remove('hidden');
+                els.dragHint.classList.add('hidden'); // Hide "Drag blue dot" text
+                layers.handle.clearLayers(); // Remove drag handle to prevent conflict
+                enableGeomanOnLayer();
+            } else {
+                // Disabled
+                els.manualEditWarning.classList.add('hidden');
+                els.dragHint.classList.remove('hidden');
+                disableGeomanOnLayer();
+                updateDragHandle(); // Restore drag handle
+            }
+        }
+        
+        function enableGeomanOnLayer() {
+            layers.buffer.eachLayer(layer => {
+                layer.pm.enable({
+                    allowSelfIntersection: true,
+                    preventMarkerRemoval: false
+                });
+                
+                // Listen for changes
+                layer.on('pm:edit', handleManualEdit);
+                layer.on('pm:dragend', handleManualEdit);
+                layer.on('pm:cut', handleManualEdit);
+                layer.on('pm:remove', handleManualEdit);
+            });
+        }
+        
+        function disableGeomanOnLayer() {
+             layers.buffer.eachLayer(layer => {
+                layer.pm.disable();
+                layer.off('pm:edit', handleManualEdit);
+                layer.off('pm:dragend', handleManualEdit);
+            });
+        }
+        
+        function handleManualEdit(e) {
+            // Get the updated GeoJSON from the Leaflet layer
+            const updatedGeoJSON = layers.buffer.toGeoJSON();
+            
+            // Update State (so download works)
+            state.bufferedGeoJSON = updatedGeoJSON;
+            
+            // Recalculate Area Stats
+            calculateStats();
+        }
+
+
+        function updateDragHandle() {
+            // Don't show drag handle in manual edit mode
+            if (state.isManualEditing) return;
+            
+            layers.handle.clearLayers();
+            if(!state.referencePoint) return;
+
+            const handlePos = turf.destination(state.referencePoint, state.bufferDistance, state.referenceBearing, { units: state.bufferUnit });
+            const latlng = [handlePos.geometry.coordinates[1], handlePos.geometry.coordinates[0]];
+            
+            const marker = L.marker(latlng, { 
+                draggable: true, 
+                icon: handleIcon 
+            }).addTo(layers.handle);
+
+            const currentLabel = `${Math.round(state.bufferDistance)}${getUnitAbbr(state.bufferUnit)}`;
+            marker.bindTooltip(currentLabel, { 
+                permanent: true, 
+                direction: 'right',
+                className: 'handle-tooltip'
+            });
+
+            marker.on('drag', (e) => {
+                const newLatLng = e.target.getLatLng();
+                const newPt = turf.point([newLatLng.lng, newLatLng.lat]);
+                const dist = turf.distance(state.referencePoint, newPt, { units: state.bufferUnit });
+                
+                state.bufferDistance = dist;
+                els.distanceInput.value = dist.toFixed(2);
+                els.distanceSlider.value = dist;
+                els.sliderVal.innerText = `${Math.round(dist)} ${getUnitAbbr(state.bufferUnit)}`;
+                
+                const newLabel = `${Math.round(dist)}${getUnitAbbr(state.bufferUnit)}`;
+                marker.setTooltipContent(newLabel);
+            });
+
+            marker.on('dragend', () => {
+                updateBuffer();
+            });
+        }
+
+        // --- Custom KML Export ---
+        function downloadCustomKML() {
+            if (!state.bufferedGeoJSON) return;
+
+            const distLabel = `${Math.round(state.bufferDistance)}${getUnitAbbr(state.bufferUnit)}`;
+            
+            // --- Naming Logic ---
+            let prefix, polygonName, fileName;
+
+            if (state.namingMode === 'custom' && state.customName.trim() !== '') {
+                const userText = state.customName.trim();
+                prefix = userText;
+                fileName = `${userText} ${state.originalFileName}`;
+                polygonName = `${userText}`; 
+            } else if (state.namingMode === 'static100') {
+                prefix = `100m BZ`;
+                fileName = `${prefix} ${state.originalFileName}`;
+                polygonName = `100m BUFFERZONE`;
+            } else {
+                prefix = `${distLabel} BZ`;
+                fileName = `${prefix} ${state.originalFileName}`;
+                polygonName = `${distLabel} BUFFERZONE`;
+            }
+
+            const lineColor = "ff7f0000"; 
+            
+            const featureToKMLGeometry = (feature) => {
+                 const processRing = (ring) => ring.map(coord => `${coord[0]},${coord[1]},0`).join(" ");
+                 if (feature.geometry.type === "Polygon") {
+                    const outerRing = processRing(feature.geometry.coordinates[0]);
+                    let innerRings = "";
+                    for(let i=1; i<feature.geometry.coordinates.length; i++) {
+                        innerRings += `<innerBoundaryIs><LinearRing><coordinates>${processRing(feature.geometry.coordinates[i])}</coordinates></LinearRing></innerBoundaryIs>`;
+                    }
+                    return `<Polygon><outerBoundaryIs><LinearRing><coordinates>${outerRing}</coordinates></LinearRing></outerBoundaryIs>${innerRings}</Polygon>`;
+                 } else if (feature.geometry.type === "MultiPolygon") {
+                    let mpXml = "<MultiGeometry>";
+                    feature.geometry.coordinates.forEach(polyCoords => {
+                        const outerRing = processRing(polyCoords[0]);
+                        let innerRings = "";
+                        for(let i=1; i<polyCoords.length; i++) {
+                            innerRings += `<innerBoundaryIs><LinearRing><coordinates>${processRing(polyCoords[i])}</coordinates></LinearRing></innerBoundaryIs>`;
+                        }
+                        mpXml += `<Polygon><outerBoundaryIs><LinearRing><coordinates>${outerRing}</coordinates></LinearRing></outerBoundaryIs>${innerRings}</Polygon>`;
+                    });
+                    mpXml += "</MultiGeometry>";
+                    return mpXml;
+                 }
+                 return "";
+            };
+
+            let kmlPlacemarks = "";
+
+            state.bufferedGeoJSON.features.forEach(feature => {
+                kmlPlacemarks += `
+                <Placemark>
+                    <name>${polygonName}</name>
+                    <styleUrl>#bufferStyle</styleUrl>
+                    ${featureToKMLGeometry(feature)}
+                </Placemark>`;
+            });
+
+            if (els.includeOriginal.checked && state.originalGeoJSON) {
+                const origName = `Original ${state.originalFileName}`;
+                state.originalGeoJSON.features.forEach(feature => {
+                     kmlPlacemarks += `
+                    <Placemark>
+                        <name>${origName}</name>
+                        <styleUrl>#originalStyle</styleUrl>
+                        ${featureToKMLGeometry(feature)}
+                    </Placemark>`;
+                });
+            }
+
+            const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Style id="bufferStyle">
+      <LineStyle>
+        <color>${lineColor}</color>
+        <width>2</width>
+      </LineStyle>
+      <PolyStyle>
+        <fill>0</fill>
+        <outline>1</outline>
+        <color>${lineColor}</color>
+      </PolyStyle>
+    </Style>
+    <Style id="originalStyle">
+      <LineStyle>
+        <color>fff6823b</color>
+        <width>2</width>
+      </LineStyle>
+      <PolyStyle>
+        <fill>0</fill>
+        <outline>1</outline>
+      </PolyStyle>
+    </Style>
+    <Folder>
+      <name>${fileName}</name>
+      ${kmlPlacemarks}
+    </Folder>
+  </Document>
+</kml>`;
+
+            const blob = new Blob([kmlContent], { type: 'application/vnd.google-earth.kml+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.kml`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // --- Utilities ---
+        function toHectares(sqMeters) {
+            return (sqMeters / 10000).toFixed(4) + " HA";
+        }
+
+        function getUnitAbbr(unit) {
+            const map = { meters: 'm', kilometers: 'km', feet: 'ft', miles: 'mi' };
+            return map[unit] || unit;
+        }
+
+        function syncSliderRange() {
+            if(state.bufferUnit === 'kilometers' || state.bufferUnit === 'miles') {
+                els.distanceSlider.max = 10;
+                els.distanceSlider.step = 0.1;
+                if(state.bufferDistance > 10) state.bufferDistance = 1;
+            } else {
+                els.distanceSlider.max = 1000;
+                els.distanceSlider.step = 10;
+                if(state.bufferDistance < 10) state.bufferDistance = 100;
+            }
+        }
+
+        function resetApp() {
+            state.originalGeoJSON = null;
+            state.bufferedGeoJSON = null;
+            state.isManualEditing = false;
+            els.manualEditToggle.checked = false;
+            els.manualEditWarning.classList.add('hidden');
+            
+            layers.original.clearLayers();
+            layers.buffer.clearLayers();
+            layers.handle.clearLayers();
+            els.controls.classList.add('opacity-50', 'pointer-events-none');
+            els.legend.classList.add('hidden');
+            els.fileInput.value = '';
+            els.origHa.innerText = '-';
+            els.origSqm.innerText = '-';
+            els.newHa.innerText = '-';
+            els.newSqm.innerText = '-';
+            els.diffHa.innerText = '-';
+            els.diffSqm.innerText = '-';
+            els.customNameInput.value = '';
+            showStatus("Ready to process");
+            map.setView([20.5937, 78.9629], 5);
+        }
+        
+        function showStatus(msg, isError = false) {
+            els.status.innerText = msg;
+            els.status.className = `text-xs text-center mt-2 ${isError ? 'text-red-500 font-bold' : 'text-slate-400'}`;
+        }
+
+    </script>
+</body>
+</html>

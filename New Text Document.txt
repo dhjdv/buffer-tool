@@ -1,0 +1,16 @@
+The Languages Used:
+HTML5 (HyperText Markup Language): Provides the structure (buttons, inputs, map container).
+
+CSS3 (Cascading Style Sheets): Handles the styling. We used the Tailwind CSS framework (loaded via CDN) for the modern look and layout.
+
+JavaScript (ES6+): Handles all the logic (uploading files, drawing the map, calculating buffers, and generating exports).
+
+Libraries used:
+
+Leaflet.js: For the interactive map.
+
+Turf.js: For the geospatial math (calculating buffer zones and areas).
+
+Leaflet-Geoman: For the manual editing tools.
+
+toGeoJSON: To convert your KML files into a format the code can understand.
