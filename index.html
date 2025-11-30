@@ -134,6 +134,9 @@
                             Hull
                         </button>
                     </div>
+                    <p id="base-shape-desc" class="text-[10px] text-slate-500 mt-2 px-2 border-l-2 border-blue-400 bg-blue-50 py-1 rounded-r leading-tight">
+                        Follows every curve and corner of your original shape exactly.
+                    </p>
                 </div>
 
                 <!-- Distance Input -->
@@ -228,23 +231,30 @@
                 </div>
                 
                 <!-- Stats (Detailed) -->
-                <div class="bg-slate-50 rounded-lg p-3 border border-slate-200 grid grid-cols-2 gap-y-3 gap-x-4">
+                <div class="bg-slate-50 rounded-lg p-3 border border-slate-200 space-y-3">
+                    <!-- Row 1: Original -->
                     <div class="flex flex-col">
                         <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Original Area</span>
-                        <span id="original-area-ha" class="text-xs font-semibold text-slate-700 leading-tight">-</span>
-                        <span id="original-area-sqm" class="text-[10px] text-slate-500 leading-tight">-</span>
-                    </div>
-                    <div class="flex flex-col">
-                        <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Buffer Area</span>
-                        <span id="new-area-ha" class="text-xs font-semibold text-blue-600 leading-tight">-</span>
-                        <span id="new-area-sqm" class="text-[10px] text-slate-500 leading-tight">-</span>
-                    </div>
-                    <div class="flex flex-col col-span-2 border-t border-slate-200 pt-2">
-                        <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Difference</span>
                         <div class="flex items-baseline gap-2">
+                            <span id="original-area-ha" class="text-xs font-semibold text-slate-700">-</span>
+                            <span id="original-area-sqm" class="text-[10px] text-slate-500">-</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Row 2: Diff and Total -->
+                    <div class="grid grid-cols-2 gap-4 border-t border-slate-200 pt-2">
+                         <!-- Left: Difference -->
+                         <div class="flex flex-col">
+                            <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Added (Diff)</span>
                             <span id="diff-area-ha" class="text-sm font-bold text-green-600">-</span>
                             <span id="diff-area-sqm" class="text-[10px] text-green-600 opacity-80">-</span>
-                        </div>
+                         </div>
+                         <!-- Right: Total -->
+                         <div class="flex flex-col">
+                            <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider mb-1">Total Area</span>
+                            <span id="new-area-ha" class="text-xs font-semibold text-blue-600">-</span>
+                            <span id="new-area-sqm" class="text-[10px] text-slate-500">-</span>
+                         </div>
                     </div>
                 </div>
 
@@ -352,6 +362,7 @@
             methodBtns: document.querySelectorAll('.method-btn'),
             gisOptionsContainer: document.getElementById('gis-options-container'),
             baseShapeBtns: document.querySelectorAll('.base-shape-btn'),
+            baseShapeDesc: document.getElementById('base-shape-desc'),
             
             cornerContainer: document.getElementById('corner-style-container'),
             joinBtns: document.querySelectorAll('.join-btn'),
@@ -455,6 +466,12 @@
                 target.classList.remove('text-slate-500');
                 
                 state.baseShape = target.dataset.shape;
+
+                // Update description
+                if (state.baseShape === 'exact') els.baseShapeDesc.innerText = "Follows every curve and corner of your original shape exactly.";
+                if (state.baseShape === 'envelope') els.baseShapeDesc.innerText = "Creates a simple rectangular box around your shape before buffering.";
+                if (state.baseShape === 'convex') els.baseShapeDesc.innerText = "Wraps a rubber band around your shape, ignoring inner cavities.";
+
                 updateBuffer();
             });
         });
