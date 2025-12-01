@@ -48,6 +48,20 @@
             background-color: #1d4ed8;
         }
         
+        /* Center Marker Icon */
+        .center-marker-icon {
+            color: #ef4444; /* Red-500 */
+            font-size: 16px;
+            text-align: center;
+            line-height: 16px;
+            text-shadow: 0 0 3px white, 0 0 3px white;
+            cursor: move; /* Indicates draggable */
+        }
+        .center-marker-icon:hover {
+            transform: scale(1.2);
+            transition: transform 0.1s;
+        }
+        
         /* Tooltip Style */
         .handle-tooltip {
             background-color: #1e293b;
@@ -118,6 +132,10 @@
                             <i class="fa-solid fa-expand mr-1"></i> Same Shape
                         </button>
                     </div>
+                    <!-- Dynamic Description -->
+                    <p id="method-desc" class="text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-blue-400 bg-blue-50 text-blue-700 leading-tight">
+                        <i class='fa-solid fa-circle-check'></i> <b>Constant Distance:</b> Creates an exact uniform boundary everywhere.
+                    </p>
                 </div>
 
                 <!-- GIS Sub-Options (Base Shape) -->
@@ -134,9 +152,36 @@
                             Hull
                         </button>
                     </div>
-                    <p id="base-shape-desc" class="text-[10px] text-slate-500 mt-2 px-2 border-l-2 border-blue-400 bg-blue-50 py-1 rounded-r leading-tight">
+                    <p id="base-shape-desc" class="text-[10px] text-slate-500 mt-2 px-2 border-l-2 border-slate-300 bg-slate-50 py-1 rounded-r leading-tight">
                         Follows every curve and corner of your original shape exactly.
                     </p>
+                </div>
+
+                <!-- Scale Sub-Options (Expansion Basis) -->
+                <div id="scale-options-container" class="hidden">
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="block text-sm font-medium text-slate-700">Expansion Basis</label>
+                        <button id="btn-reset-center" class="text-[10px] text-blue-600 underline hover:text-blue-800 hidden" title="Reset red crosshair to true geometric center">Reset Center</button>
+                    </div>
+                    
+                    <div class="flex bg-slate-100 p-1 rounded-lg">
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md shadow-sm bg-white text-slate-800 transition-all scale-method-btn" data-scale="factor">
+                            Centroid (Factor)
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all scale-method-btn" data-scale="radial">
+                            Vertex (Miter)
+                        </button>
+                        <button class="flex-1 py-1.5 text-[10px] font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all scale-method-btn" data-scale="offset">
+                            Offset (Edge)
+                        </button>
+                    </div>
+                    <p id="scale-method-desc" class="text-[10px] text-slate-500 mt-2 px-2 border-l-2 border-slate-300 bg-slate-50 py-1 rounded-r leading-tight">
+                        Multiplies size based on average radius. Preserves exact shape angles.
+                    </p>
+                    <div id="center-drag-tip" class="mt-2 text-[10px] text-red-500 flex items-center gap-1 hidden">
+                        <i class="fa-solid fa-crosshairs"></i> 
+                        <span><b>Tip:</b> Drag the red crosshair on the map to change the expansion origin!</span>
+                    </div>
                 </div>
 
                 <!-- Distance Input -->
@@ -325,12 +370,14 @@
             bufferUnit: 'meters',
             method: 'buffer', 
             baseShape: 'exact',
+            scaleMethod: 'factor', // 'factor', 'radial', 'offset'
             edgeStyle: 'round',
             namingMode: 'auto',
             customName: '',
             referencePoint: null,
             originalBBoxWidth: 0,
-            isManualEditing: false
+            isManualEditing: false,
+            featureCenters: [] // Stores custom centers for "Same Shape" logic
         };
 
         const layers = {
@@ -340,11 +387,19 @@
             buffer: L.geoJSON(null, {
                 style: { color: "#00007f", weight: 2, dashArray: '5, 5', fillOpacity: 0, fillColor: 'transparent' }
             }).addTo(map),
-            handle: L.layerGroup().addTo(map)
+            handle: L.layerGroup().addTo(map),
+            debug: L.layerGroup().addTo(map) // For showing centroid
         };
 
         const handleIcon = L.divIcon({
             className: 'drag-handle-icon',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        });
+        
+        const centerIcon = L.divIcon({
+            className: 'center-marker-icon',
+            html: '<i class="fa-solid fa-crosshairs"></i>',
             iconSize: [16, 16],
             iconAnchor: [8, 8]
         });
@@ -360,10 +415,18 @@
             
             // Toggles
             methodBtns: document.querySelectorAll('.method-btn'),
+            methodDesc: document.getElementById('method-desc'),
             gisOptionsContainer: document.getElementById('gis-options-container'),
             baseShapeBtns: document.querySelectorAll('.base-shape-btn'),
             baseShapeDesc: document.getElementById('base-shape-desc'),
             
+            // Same Shape Sub Options
+            scaleOptionsContainer: document.getElementById('scale-options-container'),
+            scaleMethodBtns: document.querySelectorAll('.scale-method-btn'),
+            scaleMethodDesc: document.getElementById('scale-method-desc'),
+            btnResetCenter: document.getElementById('btn-reset-center'),
+            centerDragTip: document.getElementById('center-drag-tip'),
+
             cornerContainer: document.getElementById('corner-style-container'),
             joinBtns: document.querySelectorAll('.join-btn'),
             
@@ -397,7 +460,7 @@
         // --- 4. Event Listeners ---
         els.dropZone.addEventListener('click', () => els.fileInput.click());
         els.dropZone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropZone.classList.add('border-blue-500', 'bg-blue-50'); });
-        els.dropZone.addEventListener('dragleave', () => els.dropZone.classList.remove('border-blue-500', 'bg-blue-50'));
+        els.dropZone.addEventListener('dragleave', () => { els.dropZone.classList.remove('border-blue-500', 'bg-blue-50'); });
         els.dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             els.dropZone.classList.remove('border-blue-500', 'bg-blue-50');
@@ -410,6 +473,14 @@
         els.btnDemo.addEventListener('click', loadDemoData);
         els.btnDownload.addEventListener('click', downloadCustomKML);
         els.btnClear.addEventListener('click', resetApp);
+        els.btnResetCenter.addEventListener('click', () => {
+            // Recalculate true centroids
+            if(state.originalGeoJSON) {
+                state.featureCenters = state.originalGeoJSON.features.map(f => turf.centroid(f));
+                initCenterMarkers(); // Re-render markers at correct spots
+                updateBuffer();
+            }
+        });
 
         // Inputs
         els.distanceInput.addEventListener('input', (e) => {
@@ -445,14 +516,80 @@
                 
                 if(state.method === 'scale') {
                     els.gisOptionsContainer.classList.add('hidden');
-                    els.cornerContainer.classList.add('hidden');
+                    els.scaleOptionsContainer.classList.remove('hidden'); 
+                    els.methodDesc.className = "text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-amber-400 bg-amber-50 text-amber-700 leading-tight";
+                    els.methodDesc.innerHTML = "<i class='fa-solid fa-triangle-exclamation'></i> <b>Variable Distance:</b> Scaling preserves shape but the buffer width will vary (geometry rule).";
+                    
+                    // Default logic updates when switching main method
+                    if(state.scaleMethod === 'offset') {
+                        layers.debug.getLayers().forEach(l => l.setOpacity(0));
+                        els.centerDragTip.classList.add('hidden');
+                        els.btnResetCenter.classList.add('hidden');
+                        els.cornerContainer.classList.remove('hidden'); 
+                    } else if(state.scaleMethod === 'radial') {
+                        layers.debug.getLayers().forEach(l => l.setOpacity(1));
+                        els.centerDragTip.classList.remove('hidden');
+                        els.btnResetCenter.classList.remove('hidden');
+                        els.cornerContainer.classList.add('hidden');
+                    } else {
+                        layers.debug.getLayers().forEach(l => l.setOpacity(1));
+                        els.centerDragTip.classList.remove('hidden');
+                        els.btnResetCenter.classList.remove('hidden');
+                        els.cornerContainer.classList.add('hidden');
+                    }
+
                 } else {
                     els.gisOptionsContainer.classList.remove('hidden');
                     els.cornerContainer.classList.remove('hidden');
+                    els.scaleOptionsContainer.classList.add('hidden');
+                    els.methodDesc.className = "text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-blue-400 bg-blue-50 text-blue-700 leading-tight";
+                    els.methodDesc.innerHTML = "<i class='fa-solid fa-circle-check'></i> <b>Constant Distance:</b> Creates an exact uniform boundary everywhere.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(0)); // Hide Centers
                 }
                 updateBuffer();
             });
         });
+
+        // Scale Method Toggle
+        els.scaleMethodBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget;
+                els.scaleMethodBtns.forEach(b => {
+                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.add('text-slate-500');
+                });
+                target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                target.classList.remove('text-slate-500');
+
+                state.scaleMethod = target.dataset.scale;
+
+                if (state.scaleMethod === 'factor') {
+                    els.scaleMethodDesc.innerText = "Multiplies size based on average radius. Preserves exact shape angles.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(1));
+                    els.centerDragTip.classList.remove('hidden');
+                    els.btnResetCenter.classList.remove('hidden');
+                    els.cornerContainer.classList.add('hidden');
+                } else if (state.scaleMethod === 'radial') {
+                    els.scaleMethodDesc.innerText = "Moves corners along bisector to ensure edges are exactly X meters out.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(1));
+                    els.centerDragTip.classList.remove('hidden');
+                    els.btnResetCenter.classList.remove('hidden');
+                    els.cornerContainer.classList.add('hidden');
+                } else if (state.scaleMethod === 'offset') {
+                    els.scaleMethodDesc.innerText = "Pushes boundaries outward by fixed distance (Buffer). Shape-preserving offset.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(0)); // Hide center for offset
+                    els.centerDragTip.classList.add('hidden');
+                    els.btnResetCenter.classList.add('hidden');
+                    els.cornerContainer.classList.remove('hidden'); // Show corners
+                    
+                    // Auto-switch to Sharp for offset if user hasn't chosen one
+                    setCornerStyle('sharp');
+                }
+
+                updateBuffer();
+            });
+        });
+
 
         // Base Shape Toggle
         els.baseShapeBtns.forEach(btn => {
@@ -479,18 +616,25 @@
         // Edge Style Toggle
         els.joinBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const target = e.currentTarget; 
-                els.joinBtns.forEach(b => {
-                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
-                    b.classList.add('text-slate-500');
-                });
-                target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
-                target.classList.remove('text-slate-500');
-
-                state.edgeStyle = target.dataset.style;
+                setCornerStyle(e.currentTarget.dataset.style);
                 updateBuffer();
             });
         });
+        
+        function setCornerStyle(style) {
+            state.edgeStyle = style;
+            
+            // Update UI buttons
+            els.joinBtns.forEach(b => {
+                if (b.dataset.style === style) {
+                    b.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.remove('text-slate-500');
+                } else {
+                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.add('text-slate-500');
+                }
+            });
+        }
 
         // Naming Convention Toggle
         els.nameRadios.forEach(radio => {
@@ -556,6 +700,11 @@
 
         function loadGeoJSON(geojson) {
             state.originalGeoJSON = geojson;
+            
+            // Calculate Centroids and Store
+            state.featureCenters = geojson.features.map(f => turf.centroid(f));
+            initCenterMarkers();
+
             els.controls.classList.remove('opacity-50', 'pointer-events-none');
             els.legend.classList.remove('hidden');
 
@@ -565,22 +714,148 @@
             const bounds = layers.original.getBounds();
             if(bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
 
-            // Setup Reference for Drag Handle
+            // Setup Reference for Drag Handle (Standard Buffer)
             const firstPoly = state.originalGeoJSON.features[0];
             const coords = turf.getCoords(firstPoly);
             const rawPt = (firstPoly.geometry.type === 'MultiPolygon') ? coords[0][0][0] : coords[0][0];
             state.referencePoint = turf.point(rawPt);
             
+            // For standard drag handle
             const center = turf.centroid(firstPoly);
             state.referenceBearing = turf.bearing(center, state.referencePoint);
 
-            // Calculate Approximate Width for Scaling Logic
-            const bbox = turf.bbox(state.originalGeoJSON); 
-            const pt1 = turf.point([bbox[0], bbox[1]]);
-            const pt2 = turf.point([bbox[2], bbox[1]]);
-            state.originalBBoxWidth = turf.distance(pt1, pt2, { units: 'meters' });
-
             updateBuffer();
+        }
+        
+        function initCenterMarkers() {
+            layers.debug.clearLayers();
+            state.featureCenters.forEach((center, index) => {
+                const latlng = [center.geometry.coordinates[1], center.geometry.coordinates[0]];
+                const marker = L.marker(latlng, { 
+                    icon: centerIcon, 
+                    draggable: true,
+                    title: "Drag to change expansion center" 
+                }).addTo(layers.debug);
+                
+                // If not in Scale mode, hide them initially
+                if(state.method !== 'scale') marker.setOpacity(0);
+
+                marker.on('drag', (e) => {
+                    const newLatLng = e.target.getLatLng();
+                    const newCenter = turf.point([newLatLng.lng, newLatLng.lat]);
+                    state.featureCenters[index] = newCenter;
+                    updateBuffer(); // Live Update
+                });
+            });
+        }
+
+        // --- MITER OFFSET HELPER ---
+        // Calculates a true geometric parallel offset by moving vertices along bisectors.
+        // Requires convex/simple polygons for best results.
+        function calculateMiterOffset(feature, distance) {
+             const processRing = (ring) => {
+                 const newRing = [];
+                 const len = ring.length;
+                 // Turf rings are closed (last = first)
+                 // Iterate through unique vertices (0 to len-2)
+                 for(let i=0; i<len-1; i++) {
+                     const curr = ring[i];
+                     const prev = ring[i===0 ? len-2 : i-1];
+                     const next = ring[i+1];
+                     
+                     const pCurr = turf.point(curr);
+                     const pPrev = turf.point(prev);
+                     const pNext = turf.point(next);
+                     
+                     // Get angles
+                     const b1 = turf.bearing(pPrev, pCurr); // In
+                     const b2 = turf.bearing(pCurr, pNext); // Out
+                     
+                     // Calculate angle between segments (interior/exterior)
+                     let angleDiff = (b2 - b1 + 360) % 360;
+                     // For a standard convex polygon (CCW), outer angles are < 180 (left turns).
+                     // Inner angles are > 180.
+                     // Bisector angle is b1 + angleDiff/2.
+                     
+                     // We need the bisector direction that points OUTWARD.
+                     // For CCW polygon, left is inside? No, standard GeoJSON polygon winding:
+                     // Outer ring is CCW (Right Hand Rule? No, OGC says CCW).
+                     // If CCW, "left" of edge is "inside". "Right" is outside.
+                     // So we want to turn Right (-90 deg) relative to edge?
+                     
+                     // Let's use simple miter math:
+                     // 1. Calculate bisector bearing
+                     // 2. Calculate miter length = distance / sin(alpha/2)
+                     
+                     const alpha = angleDiff > 180 ? 360 - angleDiff : angleDiff; // Acute angle between lines
+                     // If polygon is CCW, exterior angle is what we engage with for expansion?
+                     
+                     // Simplified approach: Average the normal vectors.
+                     // Normal 1 (Prev->Curr, rotated 90 deg right)
+                     // Normal 2 (Curr->Next, rotated 90 deg right)
+                     // This guarantees outward for CCW.
+                     
+                     // Vector math manually because Turf doesn't expose vector add easily for normals
+                     // Bearing + 90 is right turn.
+                     
+                     const offsetAngle = 90; 
+                     const n1 = b1 + offsetAngle;
+                     const n2 = b2 + offsetAngle;
+                     
+                     // Bisector angle
+                     // Average of two normals?
+                     // Vector average is safer than angle average due to wrap-around
+                     const rad1 = n1 * Math.PI / 180;
+                     const rad2 = n2 * Math.PI / 180;
+                     
+                     let bx = Math.cos(rad1) + Math.cos(rad2);
+                     let by = Math.sin(rad1) + Math.sin(rad2);
+                     
+                     // Normalize bisector
+                     const lenB = Math.sqrt(bx*bx + by*by);
+                     if (lenB < 0.001) {
+                         // Parallel lines (180 deg turn or 0 deg), minimal offset
+                         bx = Math.cos(rad1); by = Math.sin(rad1);
+                     } else {
+                         bx /= lenB; by /= lenB;
+                     }
+                     
+                     // Miter Length calculation
+                     // 1/sin(theta/2). 
+                     // Vector length of sum of two unit vectors is 2*cos(theta/2).
+                     // We want length such that projection onto normal is 'distance'.
+                     // Miter Vector = BisectorUnit * (distance / (dot(BisectorUnit, Normal1)))
+                     
+                     const dot = bx*Math.cos(rad1) + by*Math.sin(rad1);
+                     let miterDist = distance;
+                     if (Math.abs(dot) > 0.01) {
+                         miterDist = distance / dot;
+                     }
+                     
+                     // Miter Limit to prevent spikes
+                     const limit = distance * 3;
+                     if (Math.abs(miterDist) > limit) miterDist = limit * Math.sign(miterDist);
+                     
+                     // Destination point
+                     // Convert vector back to lat/lon shift? No, use turf destination with bearing/distance
+                     const bisectorBearing = Math.atan2(by, bx) * 180 / Math.PI;
+                     const dest = turf.destination(pCurr, Math.abs(miterDist), bisectorBearing, {units: state.bufferUnit});
+                     
+                     newRing.push(dest.geometry.coordinates);
+                 }
+                 newRing.push(newRing[0]); // Close
+                 return newRing;
+             };
+             
+             let newCoords = [];
+             if(feature.geometry.type === "Polygon") {
+                 newCoords = feature.geometry.coordinates.map(processRing);
+                 return turf.polygon(newCoords, feature.properties);
+             } else if(feature.geometry.type === "MultiPolygon") {
+                 newCoords = feature.geometry.coordinates.map(poly => poly.map(processRing));
+                 return turf.multiPolygon(newCoords, feature.properties);
+             }
+             return feature;
         }
 
         function updateBuffer() {
@@ -594,20 +869,67 @@
 
                 if (state.method === 'scale') {
                     // --- SCALE METHOD ---
-                    let distMeters = state.bufferDistance;
-                    if(state.bufferUnit === 'kilometers') distMeters *= 1000;
-                    if(state.bufferUnit === 'miles') distMeters *= 1609.34;
-                    if(state.bufferUnit === 'feet') distMeters *= 0.3048;
-
-                    const width = state.originalBBoxWidth || 1; 
-                    const scaleFactor = (width + (2 * distMeters)) / width;
                     
-                    const scaled = turf.transformScale(state.originalGeoJSON, scaleFactor);
-                    bufferedFeatures = scaled.features;
+                    bufferedFeatures = state.originalGeoJSON.features.map((f, i) => {
+                        // Use Custom Center if available
+                        const center = state.featureCenters[i] || turf.centroid(f);
+
+                        if (state.scaleMethod === 'radial') {
+                             // --- VERTEX RADIAL ---
+                             const processRing = (ring) => {
+                                 return ring.map(coord => {
+                                     const pt = turf.point(coord);
+                                     const bearing = turf.bearing(center, pt);
+                                     const currentDist = turf.distance(center, pt, {units: state.bufferUnit});
+                                     const newPt = turf.destination(center, currentDist + state.bufferDistance, bearing, {units: state.bufferUnit});
+                                     return newPt.geometry.coordinates;
+                                 });
+                             };
+
+                             let newCoordinates = [];
+                             if (f.geometry.type === "Polygon") {
+                                 newCoordinates = f.geometry.coordinates.map(processRing);
+                                 return turf.polygon(newCoordinates, f.properties);
+                             } else if (f.geometry.type === "MultiPolygon") {
+                                 newCoordinates = f.geometry.coordinates.map(poly => poly.map(processRing));
+                                 return turf.multiPolygon(newCoordinates, f.properties);
+                             }
+                             return f; // Fallback
+
+                        } else if (state.scaleMethod === 'offset') {
+                            // --- OFFSET (Standard Buffer OR Manual Miter) ---
+                            // If Sharp is selected, use true miter logic
+                            if (state.edgeStyle === 'sharp') {
+                                return calculateMiterOffset(f, state.bufferDistance);
+                            } else {
+                                // Default Turf Buffer (Round or Square/Chamfer)
+                                let steps = 64;
+                                if (state.edgeStyle === 'square') steps = 1;
+                                return turf.buffer(f, state.bufferDistance, { 
+                                    units: state.bufferUnit, 
+                                    steps: steps 
+                                });
+                            }
+
+                        } else {
+                            // --- CENTROID FACTOR ---
+                            let totalDist = 0;
+                            let count = 0;
+                            const coords = turf.coordAll(f);
+                            coords.forEach(c => {
+                                totalDist += turf.distance(center, turf.point(c), {units: state.bufferUnit});
+                                count++;
+                            });
+                            const avgRadius = (count > 0) ? totalDist / count : 1;
+                            const scaleFactor = (avgRadius + state.bufferDistance) / avgRadius;
+                            return turf.transformScale(f, scaleFactor, { origin: center });
+                        }
+                    });
 
                 } else {
                     // --- STANDARD BUFFER METHOD ---
-                    // 1. Determine Base Geometry
+                    layers.debug.getLayers().forEach(l => l.setOpacity(0)); // Hide Centers
+                    
                     const baseGeoms = state.originalGeoJSON.features.map(f => {
                          if (state.baseShape === 'envelope') {
                              return turf.bboxPolygon(turf.bbox(f));
@@ -618,7 +940,6 @@
                          return f; // Exact
                     });
 
-                    // 2. Buffer each
                     let steps = 64;
                     if (state.edgeStyle === 'sharp') steps = 3;
                     if (state.edgeStyle === 'square') steps = 1;
@@ -631,14 +952,14 @@
                     });
                 }
 
-                // Combine into collection
+                // Combine
                 state.bufferedGeoJSON = turf.featureCollection(bufferedFeatures);
 
-                // Render Map
+                // Render
                 layers.buffer.clearLayers();
                 layers.buffer.addData(state.bufferedGeoJSON);
                 
-                // Re-apply editing if active (because we just wiped the layer)
+                // Re-apply editing
                 if (state.isManualEditing) {
                     enableGeomanOnLayer();
                 }
@@ -651,7 +972,6 @@
             }
         }
         
-        // Separate stats calc to allow manual edits to trigger it without regenerating buffer
         function calculateStats() {
              if(!state.originalGeoJSON || !state.bufferedGeoJSON) return;
              
@@ -672,31 +992,24 @@
             els.diffSqm.innerText = "+" + fmt(diff);
         }
         
-        // --- Manual Editing Logic ---
+        // --- Manual Editing ---
         function toggleEditMode() {
             if (state.isManualEditing) {
-                // Enabled
                 els.manualEditWarning.classList.remove('hidden');
-                els.dragHint.classList.add('hidden'); // Hide "Drag blue dot" text
-                layers.handle.clearLayers(); // Remove drag handle to prevent conflict
+                els.dragHint.classList.add('hidden'); 
+                layers.handle.clearLayers(); 
                 enableGeomanOnLayer();
             } else {
-                // Disabled
                 els.manualEditWarning.classList.add('hidden');
                 els.dragHint.classList.remove('hidden');
                 disableGeomanOnLayer();
-                updateDragHandle(); // Restore drag handle
+                updateDragHandle();
             }
         }
         
         function enableGeomanOnLayer() {
             layers.buffer.eachLayer(layer => {
-                layer.pm.enable({
-                    allowSelfIntersection: true,
-                    preventMarkerRemoval: false
-                });
-                
-                // Listen for changes
+                layer.pm.enable({ allowSelfIntersection: true, preventMarkerRemoval: false });
                 layer.on('pm:edit', handleManualEdit);
                 layer.on('pm:dragend', handleManualEdit);
                 layer.on('pm:cut', handleManualEdit);
@@ -713,20 +1026,21 @@
         }
         
         function handleManualEdit(e) {
-            // Get the updated GeoJSON from the Leaflet layer
             const updatedGeoJSON = layers.buffer.toGeoJSON();
-            
-            // Update State (so download works)
             state.bufferedGeoJSON = updatedGeoJSON;
-            
-            // Recalculate Area Stats
             calculateStats();
         }
 
-
         function updateDragHandle() {
-            // Don't show drag handle in manual edit mode
             if (state.isManualEditing) return;
+            if (state.method === 'scale') {
+                if (state.scaleMethod === 'offset') {
+                    // Fallthrough to show handle
+                } else {
+                    layers.handle.clearLayers(); 
+                    return;
+                }
+            }
             
             layers.handle.clearLayers();
             if(!state.referencePoint) return;
@@ -734,30 +1048,20 @@
             const handlePos = turf.destination(state.referencePoint, state.bufferDistance, state.referenceBearing, { units: state.bufferUnit });
             const latlng = [handlePos.geometry.coordinates[1], handlePos.geometry.coordinates[0]];
             
-            const marker = L.marker(latlng, { 
-                draggable: true, 
-                icon: handleIcon 
-            }).addTo(layers.handle);
+            const marker = L.marker(latlng, { draggable: true, icon: handleIcon }).addTo(layers.handle);
 
             const currentLabel = `${Math.round(state.bufferDistance)}${getUnitAbbr(state.bufferUnit)}`;
-            marker.bindTooltip(currentLabel, { 
-                permanent: true, 
-                direction: 'right',
-                className: 'handle-tooltip'
-            });
+            marker.bindTooltip(currentLabel, { permanent: true, direction: 'right', className: 'handle-tooltip' });
 
             marker.on('drag', (e) => {
                 const newLatLng = e.target.getLatLng();
                 const newPt = turf.point([newLatLng.lng, newLatLng.lat]);
                 const dist = turf.distance(state.referencePoint, newPt, { units: state.bufferUnit });
-                
                 state.bufferDistance = dist;
                 els.distanceInput.value = dist.toFixed(2);
                 els.distanceSlider.value = dist;
                 els.sliderVal.innerText = `${Math.round(dist)} ${getUnitAbbr(state.bufferUnit)}`;
-                
-                const newLabel = `${Math.round(dist)}${getUnitAbbr(state.bufferUnit)}`;
-                marker.setTooltipContent(newLabel);
+                marker.setTooltipContent(`${Math.round(dist)}${getUnitAbbr(state.bufferUnit)}`);
             });
 
             marker.on('dragend', () => {
@@ -771,7 +1075,6 @@
 
             const distLabel = `${Math.round(state.bufferDistance)}${getUnitAbbr(state.bufferUnit)}`;
             
-            // --- Naming Logic ---
             let prefix, polygonName, fileName;
 
             if (state.namingMode === 'custom' && state.customName.trim() !== '') {
@@ -912,6 +1215,7 @@
             layers.original.clearLayers();
             layers.buffer.clearLayers();
             layers.handle.clearLayers();
+            layers.debug.clearLayers();
             els.controls.classList.add('opacity-50', 'pointer-events-none');
             els.legend.classList.add('hidden');
             els.fileInput.value = '';
