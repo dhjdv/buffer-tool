@@ -20,7 +20,7 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-    <!-- Markdown Parser (for AI responses) -->
+    <!-- Markdown Parser -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <style>
@@ -571,7 +571,7 @@
                 bufferDirection: 1, // 1 for Out, -1 for In
                 method: 'buffer', 
                 baseShape: 'exact',
-                scaleMethod: 'factor', // 'factor', 'radial', 'offset'
+                scaleMethod: 'factor', 
                 edgeStyle: 'round',
                 namingMode: 'auto',
                 customName: '',
@@ -581,7 +581,7 @@
                 isMeasuring: false,
                 featureCenters: [],
                 measurePoints: [],
-                isAutoRepair: true // Enabled by default internally
+                isAutoRepair: true 
             };
 
             const layers = {
@@ -608,7 +608,7 @@
                 distanceInput: document.getElementById('distance-input'),
                 distanceSlider: document.getElementById('distance-slider'),
                 unitSelect: document.getElementById('unit-select'),
-                dirBtns: document.querySelectorAll('.dir-btn'), // Direction buttons
+                dirBtns: document.querySelectorAll('.dir-btn'), 
                 methodBtns: document.querySelectorAll('.method-btn'),
                 methodDesc: document.getElementById('method-desc'),
                 gisOptionsContainer: document.getElementById('gis-options-container'),
@@ -971,8 +971,7 @@
             
             // --- CLEAN GEOMETRY FUNCTION ---
             function cleanGeometry(geoJSON) {
-                if (!state.isAutoRepair) return geoJSON;
-                
+                // Always auto-repair
                 let cleanFeatures = [];
                 const features = geoJSON.type === 'FeatureCollection' ? geoJSON.features : [geoJSON];
                 
