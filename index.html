@@ -11,7 +11,7 @@
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     
-    <!-- Leaflet Geoman CSS (For Manual Editing) -->
+    <!-- Leaflet Geoman CSS -->
     <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
 
     <!-- Font Awesome -->
@@ -19,6 +19,9 @@
 
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Markdown Parser (for AI responses) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <style>
         body { font-family: 'Inter', sans-serif; }
@@ -50,12 +53,12 @@
         
         /* Center Marker Icon */
         .center-marker-icon {
-            color: #ef4444; /* Red-500 */
+            color: #ef4444;
             font-size: 16px;
             text-align: center;
             line-height: 16px;
             text-shadow: 0 0 3px white, 0 0 3px white;
-            cursor: move; /* Indicates draggable */
+            cursor: move; 
         }
         .center-marker-icon:hover {
             transform: scale(1.2);
@@ -83,25 +86,86 @@
         .toggle-checkbox:checked + .toggle-label {
             background-color: #2563eb;
         }
+        .toggle-label {
+            width: 40px;
+            height: 20px;
+            background-color: #cbd5e1;
+            border-radius: 9999px;
+            position: relative;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in;
+        }
+        .toggle-label:after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background-color: white;
+            border-radius: 50%;
+            transition: transform 0.2s ease-in;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        .toggle-checkbox:checked + .toggle-label:after {
+            transform: translateX(20px);
+        }
+        .toggle-checkbox {
+            display: none;
+        }
 
-        /* Measure Tooltip */
-        .measure-tooltip {
-            background-color: rgba(255, 255, 255, 0.9);
-            border: 1px solid #3b82f6;
-            color: #1e293b;
+        /* Measure Tool Styles */
+        .measure-cursor { cursor: crosshair !important; }
+        .cursor-tooltip {
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid #475569;
+            color: white;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            pointer-events: none; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .cursor-tooltip::before { border-right-color: rgba(30, 41, 59, 0.9); }
+        
+        /* Segment Labels */
+        .segment-label {
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid #94a3b8;
+            color: #475569;
             font-size: 10px;
             font-weight: 600;
-            padding: 1px 4px;
+            padding: 0 4px;
             border-radius: 3px;
             white-space: nowrap;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
-        .measure-tooltip-end {
-            font-weight: 800;
-            color: #2563eb;
-            border: 2px solid #2563eb;
+        .segment-label::before { border: none; }
+        
+        /* CUSTOM GEOMAN TOOLBAR POSITIONING */
+        .leaflet-top.leaflet-right .leaflet-pm-toolbar {
+            margin-top: 50px !important;  
+            margin-right: 15px !important; 
+            border: none !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
         }
-        .leaflet-container.measuring-cursor {
-            cursor: crosshair !important;
+        .leaflet-pm-toolbar .leaflet-buttons-control-button {
+            border: 1px solid #e2e8f0 !important;
+            background-color: white !important;
+            color: #475569 !important;
+            width: 34px !important;
+            height: 34px !important;
+            line-height: 34px !important;
+        }
+        .leaflet-pm-toolbar .leaflet-buttons-control-button:hover {
+            background-color: #f8fafc !important;
+            color: #2563eb !important;
+        }
+        .leaflet-pm-toolbar .leaflet-buttons-control-button.active {
+            background-color: #2563eb !important;
+            color: white !important;
         }
     </style>
 </head>
@@ -135,12 +199,25 @@
             <button id="btn-demo" class="text-xs text-blue-600 hover:text-blue-800 underline self-center -mt-2">
                 Or load demo polygon
             </button>
-
+            
             <hr class="border-slate-200">
 
             <!-- Buffer Controls -->
             <div class="space-y-4 opacity-50 pointer-events-none transition-opacity" id="controls-section">
                 
+                <!-- Buffer Direction -->
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">Direction</label>
+                    <div class="flex bg-slate-100 p-1 rounded-lg">
+                        <button class="flex-1 py-1.5 text-xs font-medium rounded-md shadow-sm bg-white text-slate-800 transition-all dir-btn" data-dir="1">
+                            <i class="fa-solid fa-expand-alt mr-1"></i> Expand (Out)
+                        </button>
+                        <button class="flex-1 py-1.5 text-xs font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all dir-btn" data-dir="-1">
+                            <i class="fa-solid fa-compress-alt mr-1"></i> Shrink (In)
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Buffer Method -->
                 <div>
                     <label class="block text-sm font-medium text-slate-700 mb-2">Expansion Method</label>
@@ -196,7 +273,7 @@
                         </button>
                     </div>
                     <p id="scale-method-desc" class="text-[10px] text-slate-500 mt-2 px-2 border-l-2 border-slate-300 bg-slate-50 py-1 rounded-r leading-tight">
-                        Multiplies size based on BBox. Expands overall Width/Height by exactly 2x Distance.
+                        Multiplies size based on Shape Area. Preserves exact shape angles.
                     </p>
                     <div id="center-drag-tip" class="mt-2 text-[10px] text-red-500 flex items-center gap-1 hidden">
                         <i class="fa-solid fa-crosshairs"></i> 
@@ -247,30 +324,29 @@
                 <div class="space-y-2">
                     <!-- Manual Editing -->
                     <div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
+                        <div class="flex items-center justify-between mb-2">
+                             <div class="flex items-center gap-2">
                                 <div class="bg-white p-1.5 rounded-md shadow-sm text-blue-600">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </div>
                                 <div class="flex flex-col">
-                                    <span class="text-xs font-bold text-slate-700">Edit Vertices</span>
-                                    <span class="text-[10px] text-slate-500">Manually adjust shape</span>
+                                    <span class="text-xs font-bold text-slate-700">Manual Editing</span>
+                                    <span class="text-[10px] text-slate-500">Use toolbar on map ↗️</span>
                                 </div>
                             </div>
-                            
                             <!-- Toggle -->
-                            <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                                <input type="checkbox" name="toggle" id="manual-edit-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 left-0 transition-all duration-300"/>
-                                <label for="manual-edit-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-300 cursor-pointer transition-colors duration-300"></label>
+                            <div class="flex items-center">
+                                <input type="checkbox" id="manual-edit-toggle" class="toggle-checkbox">
+                                <label for="manual-edit-toggle" class="toggle-label"></label>
                             </div>
                         </div>
                         <div id="manual-edit-warning" class="hidden mt-2 pt-2 border-t border-blue-100 text-[10px] text-blue-600">
-                            <i class="fa-solid fa-circle-info mr-1"></i> Drag vertices to move. Click edges to add points. Right-click points to delete.
+                            <p class="mb-1"><i class="fa-solid fa-circle-info mr-1"></i> Drag vertices to move.</p>
                         </div>
                     </div>
 
                     <!-- Measure Tool -->
-                    <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-3 transition-all duration-300" id="measure-panel">
                         <div class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
                                 <div class="bg-white p-1.5 rounded-md shadow-sm text-indigo-600">
@@ -278,20 +354,32 @@
                                 </div>
                                 <div class="flex flex-col">
                                     <span class="text-xs font-bold text-slate-700">Measure Distance</span>
-                                    <span class="text-[10px] text-slate-500">Click map points</span>
+                                    <span class="text-[10px] text-slate-500" id="measure-hint">Click map points</span>
                                 </div>
                             </div>
                             
                             <!-- Toggle -->
-                            <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                                <input type="checkbox" name="measure-toggle" id="measure-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 left-0 transition-all duration-300"/>
-                                <label for="measure-toggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-300 cursor-pointer transition-colors duration-300"></label>
+                            <div class="flex items-center">
+                                <input type="checkbox" id="measure-toggle" class="toggle-checkbox">
+                                <label for="measure-toggle" class="toggle-label"></label>
                             </div>
                         </div>
-                        <!-- Measure Stats -->
-                        <div id="measure-stats" class="hidden mt-2 pt-2 border-t border-indigo-100 flex justify-between items-center text-[10px]">
-                            <span class="text-slate-500">Total: <b id="measure-total" class="text-indigo-600 text-sm">0 m</b></span>
-                            <button id="btn-clear-measure" class="text-red-500 hover:text-red-700 font-bold px-2 py-1 hover:bg-red-50 rounded">Clear</button>
+                        
+                        <!-- Measure Stats (Hidden until active) -->
+                        <div id="measure-stats" class="hidden mt-3 pt-2 border-t border-indigo-100">
+                            <div class="flex justify-between items-end mb-2">
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] uppercase text-slate-400 font-bold tracking-wider">Total Distance</span>
+                                    <span id="measure-total" class="text-lg font-bold text-indigo-600 leading-none">0 m</span>
+                                </div>
+                                <div class="flex gap-1">
+                                    <button id="btn-undo-measure" class="text-xs bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-2 py-1 rounded shadow-sm" title="Undo last point"><i class="fa-solid fa-rotate-left"></i></button>
+                                    <button id="btn-clear-measure" class="text-xs bg-white border border-red-200 hover:bg-red-50 text-red-500 px-2 py-1 rounded shadow-sm" title="Clear all"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </div>
+                            <div class="text-[10px] text-slate-400 flex items-center gap-1">
+                                <i class="fa-solid fa-mouse-pointer"></i> <span>Right-click to finish line</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -398,19 +486,79 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // --- 1. Map Initialization ---
-            const map = L.map('map', { zoomControl: false }).setView([20.5937, 78.9629], 5);
+            const map = L.map('map', { 
+                zoomControl: false, 
+                minZoom: 1, 
+                maxZoom: 28 
+            }).setView([20.5937, 78.9629], 5);
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-            const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' });
-            const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Esri' });
+            const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+                attribution: '© OpenStreetMap',
+                maxNativeZoom: 19,
+                maxZoom: 28
+            });
+            const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { 
+                attribution: '© Esri',
+                maxNativeZoom: 19,
+                maxZoom: 28
+            });
+            const darkMatter = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxNativeZoom: 20,
+                maxZoom: 28
+            });
+            
             satellite.addTo(map);
-            L.control.layers({ "Satellite": satellite, "Street": osm }, null, { position: 'bottomright' }).addTo(map);
+            L.control.layers({ "Satellite": satellite, "Street": osm, "Dark Mode": darkMatter }, null, { position: 'bottomright' }).addTo(map);
+            
+            // Auto-Switch to Dark Mode on High Zoom
+            map.on('zoomend', () => {
+                const z = map.getZoom();
+                if (z > 18) { 
+                    if (!map.hasLayer(darkMatter)) {
+                        map.addLayer(darkMatter);
+                        if (map.hasLayer(satellite)) map.removeLayer(satellite);
+                        if (map.hasLayer(osm)) map.removeLayer(osm);
+                    }
+                } else {
+                     if (map.hasLayer(darkMatter)) {
+                         map.addLayer(satellite); 
+                         map.removeLayer(darkMatter);
+                     }
+                }
+            });
 
-            // Geoman Setup (Safe check)
+            // Geoman Setup with Controls
             if(map.pm) {
-                map.pm.setGlobalOptions({
-                    allowSelfIntersection: true,
+                map.pm.addControls({
+                    position: 'topright',
+                    drawCircle: false,
+                    drawCircleMarker: false,
+                    drawMarker: false,
+                    drawPolyline: false,
+                    drawRectangle: false,
+                    drawPolygon: false,
+                    drawText: false,
+                    editMode: true,
+                    dragMode: true,
+                    cutPolygon: true,
+                    removalMode: true,
+                    rotateMode: false
                 });
+                
+                map.pm.setGlobalOptions({ 
+                    allowSelfIntersection: true,
+                    snappable: true,
+                    snapDistance: 15
+                });
+                
+                // Hook into Geoman events to pause buffer updates
+                map.on('pm:globaleditmodetoggled', (e) => { state.isManualEditing = e.enabled; });
+                map.on('pm:globaldragmodetoggled', (e) => { state.isManualEditing = e.enabled; });
+                map.on('pm:globalremovalmodetoggled', (e) => { state.isManualEditing = e.enabled; });
+                map.on('pm:globalcutmodetoggled', (e) => { state.isManualEditing = e.enabled; });
             }
 
             // --- 2. State Management ---
@@ -420,6 +568,7 @@
                 bufferedGeoJSON: null,
                 bufferDistance: 100,
                 bufferUnit: 'meters',
+                bufferDirection: 1, // 1 for Out, -1 for In
                 method: 'buffer', 
                 baseShape: 'exact',
                 scaleMethod: 'factor', // 'factor', 'radial', 'offset'
@@ -429,35 +578,27 @@
                 referencePoint: null,
                 originalBBoxWidth: 0,
                 isManualEditing: false,
-                isMeasuring: false, // New state for measuring
+                isMeasuring: false,
                 featureCenters: [],
-                measurePoints: [] // Store measure points
+                measurePoints: [],
+                isAutoRepair: true // Enabled by default internally
             };
 
             const layers = {
                 original: L.geoJSON(null, {
-                    style: { color: "#3b82f6", weight: 2, fillOpacity: 0.1 }
+                    style: { color: "#3b82f6", weight: 2, fillOpacity: 0.1, pmIgnore: true } // Ignore orig in edit
                 }).addTo(map),
                 buffer: L.geoJSON(null, {
                     style: { color: "#00007f", weight: 2, dashArray: '5, 5', fillOpacity: 0, fillColor: 'transparent' }
                 }).addTo(map),
                 handle: L.layerGroup().addTo(map),
                 debug: L.layerGroup().addTo(map), 
-                measure: L.layerGroup().addTo(map) // New layer group for measurement
+                measure: L.layerGroup().addTo(map),
+                errors: L.layerGroup().addTo(map) 
             };
 
-            const handleIcon = L.divIcon({
-                className: 'drag-handle-icon',
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
-            });
-            
-            const centerIcon = L.divIcon({
-                className: 'center-marker-icon',
-                html: '<i class="fa-solid fa-crosshairs"></i>',
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
-            });
+            const handleIcon = L.divIcon({ className: 'drag-handle-icon', iconSize: [16, 16], iconAnchor: [8, 8] });
+            const centerIcon = L.divIcon({ className: 'center-marker-icon', html: '<i class="fa-solid fa-crosshairs"></i>', iconSize: [16, 16], iconAnchor: [8, 8] });
 
             // --- 3. DOM Elements ---
             const els = {
@@ -467,25 +608,21 @@
                 distanceInput: document.getElementById('distance-input'),
                 distanceSlider: document.getElementById('distance-slider'),
                 unitSelect: document.getElementById('unit-select'),
-                
-                // Toggles
+                dirBtns: document.querySelectorAll('.dir-btn'), // Direction buttons
                 methodBtns: document.querySelectorAll('.method-btn'),
                 methodDesc: document.getElementById('method-desc'),
                 gisOptionsContainer: document.getElementById('gis-options-container'),
                 baseShapeBtns: document.querySelectorAll('.base-shape-btn'),
                 baseShapeDesc: document.getElementById('base-shape-desc'),
-                
-                // Same Shape Sub Options
                 scaleOptionsContainer: document.getElementById('scale-options-container'),
                 scaleMethodBtns: document.querySelectorAll('.scale-method-btn'),
                 scaleMethodDesc: document.getElementById('scale-method-desc'),
                 btnResetCenter: document.getElementById('btn-reset-center'),
                 centerDragTip: document.getElementById('center-drag-tip'),
-
                 cornerContainer: document.getElementById('corner-style-container'),
                 joinBtns: document.querySelectorAll('.join-btn'),
                 
-                // Manual Edit
+                // Editing
                 manualEditToggle: document.getElementById('manual-edit-toggle'),
                 manualEditWarning: document.getElementById('manual-edit-warning'),
                 dragHint: document.getElementById('drag-hint'),
@@ -494,25 +631,21 @@
                 measureToggle: document.getElementById('measure-toggle'),
                 measureStats: document.getElementById('measure-stats'),
                 measureTotal: document.getElementById('measure-total'),
+                btnUndoMeasure: document.getElementById('btn-undo-measure'),
                 btnClearMeasure: document.getElementById('btn-clear-measure'),
                 
-                // Actions
                 btnDownload: document.getElementById('btn-download'),
                 btnClear: document.getElementById('btn-clear'),
                 btnDemo: document.getElementById('btn-demo'),
                 status: document.getElementById('status-msg'),
                 sliderVal: document.getElementById('slider-val'),
                 legend: document.getElementById('legend'),
-                
-                // Stats
                 origHa: document.getElementById('original-area-ha'),
                 origSqm: document.getElementById('original-area-sqm'),
                 newHa: document.getElementById('new-area-ha'),
                 newSqm: document.getElementById('new-area-sqm'),
                 diffHa: document.getElementById('diff-area-ha'),
                 diffSqm: document.getElementById('diff-area-sqm'),
-                
-                // Naming & Options
                 nameRadios: document.getElementsByName('name_mode'),
                 customNameInput: document.getElementById('custom-name-input'),
                 includeOriginal: document.getElementById('include-original')
@@ -535,219 +668,169 @@
             els.btnDownload.addEventListener('click', downloadCustomKML);
             els.btnClear.addEventListener('click', resetApp);
             els.btnResetCenter.addEventListener('click', () => {
-                // Recalculate true centroids
                 if(state.originalGeoJSON) {
                     state.featureCenters = state.originalGeoJSON.features.map(f => turf.centroid(f));
-                    initCenterMarkers(); // Re-render markers at correct spots
+                    initCenterMarkers(); 
                     updateBuffer();
                 }
             });
+            
+            // Direction Toggle Listener
+            els.dirBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    updateToggleUI(els.dirBtns, e.currentTarget);
+                    state.bufferDirection = parseInt(e.currentTarget.dataset.dir);
+                    updateBuffer();
+                });
+            });
 
-            // Inputs
             els.distanceInput.addEventListener('input', (e) => {
                 state.bufferDistance = parseFloat(e.target.value) || 0;
                 els.distanceSlider.value = state.bufferDistance;
                 updateBuffer();
             });
-            
             els.distanceSlider.addEventListener('input', (e) => {
                 state.bufferDistance = parseFloat(e.target.value);
                 els.distanceInput.value = state.bufferDistance;
                 updateBuffer();
             });
-
             els.unitSelect.addEventListener('change', (e) => {
                 state.bufferUnit = e.target.value;
                 syncSliderRange();
                 updateBuffer();
             });
 
-            // Method Toggle
             els.methodBtns.forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const target = e.currentTarget;
-                    els.methodBtns.forEach(b => {
-                        b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
-                        b.classList.add('text-slate-500');
-                    });
-                    target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
-                    target.classList.remove('text-slate-500');
-
-                    state.method = target.dataset.method;
-                    
-                    if(state.method === 'scale') {
-                        els.gisOptionsContainer.classList.add('hidden');
-                        els.scaleOptionsContainer.classList.remove('hidden'); 
-                        els.methodDesc.className = "text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-amber-400 bg-amber-50 text-amber-700 leading-tight";
-                        els.methodDesc.innerHTML = "<i class='fa-solid fa-triangle-exclamation'></i> <b>Variable Distance:</b> Scaling preserves shape but the buffer width will vary (geometry rule).";
-                        
-                        // Default logic updates when switching main method
-                        if(state.scaleMethod === 'offset') {
-                            layers.debug.getLayers().forEach(l => l.setOpacity(0));
-                            els.centerDragTip.classList.add('hidden');
-                            els.btnResetCenter.classList.add('hidden');
-                            els.cornerContainer.classList.remove('hidden'); 
-                        } else if(state.scaleMethod === 'radial') {
-                            layers.debug.getLayers().forEach(l => l.setOpacity(1));
-                            els.centerDragTip.classList.remove('hidden');
-                            els.btnResetCenter.classList.remove('hidden');
-                            els.cornerContainer.classList.add('hidden');
-                        } else {
-                            layers.debug.getLayers().forEach(l => l.setOpacity(1));
-                            els.centerDragTip.classList.remove('hidden');
-                            els.btnResetCenter.classList.remove('hidden');
-                            els.cornerContainer.classList.add('hidden');
-                        }
-
-                    } else {
-                        els.gisOptionsContainer.classList.remove('hidden');
-                        els.cornerContainer.classList.remove('hidden');
-                        els.scaleOptionsContainer.classList.add('hidden');
-                        els.methodDesc.className = "text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-blue-400 bg-blue-50 text-blue-700 leading-tight";
-                        els.methodDesc.innerHTML = "<i class='fa-solid fa-circle-check'></i> <b>Constant Distance:</b> Creates an exact uniform boundary everywhere.";
-                        layers.debug.getLayers().forEach(l => l.setOpacity(0)); // Hide Centers
-                    }
+                    updateToggleUI(els.methodBtns, e.currentTarget);
+                    state.method = e.currentTarget.dataset.method;
+                    toggleMethodOptions(state.method);
                     updateBuffer();
                 });
             });
 
-            // Scale Method Toggle
             els.scaleMethodBtns.forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const target = e.currentTarget;
-                    els.scaleMethodBtns.forEach(b => {
-                        b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
-                        b.classList.add('text-slate-500');
-                    });
-                    target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
-                    target.classList.remove('text-slate-500');
-
-                    state.scaleMethod = target.dataset.scale;
-
-                    if (state.scaleMethod === 'factor') {
-                        els.scaleMethodDesc.innerText = "Multiplies size based on BBox. Expands overall Width/Height by exactly 2x Distance.";
-                        layers.debug.getLayers().forEach(l => l.setOpacity(1));
-                        els.centerDragTip.classList.remove('hidden');
-                        els.btnResetCenter.classList.remove('hidden');
-                        els.cornerContainer.classList.add('hidden');
-                    } else if (state.scaleMethod === 'radial') {
-                        els.scaleMethodDesc.innerText = "Adds X meters to each vertex from center. Pushes corners out exactly.";
-                        layers.debug.getLayers().forEach(l => l.setOpacity(1));
-                        els.centerDragTip.classList.remove('hidden');
-                        els.btnResetCenter.classList.remove('hidden');
-                        els.cornerContainer.classList.add('hidden');
-                    } else if (state.scaleMethod === 'offset') {
-                        els.scaleMethodDesc.innerText = "Pushes boundaries outward by fixed distance (Buffer). Shape-preserving offset.";
-                        layers.debug.getLayers().forEach(l => l.setOpacity(0)); // Hide center for offset
-                        els.centerDragTip.classList.add('hidden');
-                        els.btnResetCenter.classList.add('hidden');
-                        els.cornerContainer.classList.remove('hidden'); // Show corners
-                        
-                        // Auto-switch to Sharp for offset if user hasn't chosen one
-                        setCornerStyle('sharp');
-                    }
-
+                    updateToggleUI(els.scaleMethodBtns, e.currentTarget);
+                    state.scaleMethod = e.currentTarget.dataset.scale;
+                    updateScaleDescriptions(state.scaleMethod);
                     updateBuffer();
                 });
             });
 
-
-            // Base Shape Toggle
             els.baseShapeBtns.forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const target = e.currentTarget;
-                    els.baseShapeBtns.forEach(b => {
-                        b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
-                        b.classList.add('text-slate-500');
-                    });
-                    target.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
-                    target.classList.remove('text-slate-500');
-                    
-                    state.baseShape = target.dataset.shape;
-
-                    // Update description
-                    if (state.baseShape === 'exact') els.baseShapeDesc.innerText = "Follows every curve and corner of your original shape exactly.";
-                    if (state.baseShape === 'envelope') els.baseShapeDesc.innerText = "Creates a simple rectangular box around your shape before buffering.";
-                    if (state.baseShape === 'convex') els.baseShapeDesc.innerText = "Wraps a rubber band around your shape, ignoring inner cavities.";
-
+                    updateToggleUI(els.baseShapeBtns, e.currentTarget);
+                    state.baseShape = e.currentTarget.dataset.shape;
+                    updateBaseShapeDesc(state.baseShape);
                     updateBuffer();
                 });
             });
 
-            // Edge Style Toggle
             els.joinBtns.forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     setCornerStyle(e.currentTarget.dataset.style);
                     updateBuffer();
                 });
             });
-            
-            function setCornerStyle(style) {
-                state.edgeStyle = style;
-                
-                // Update UI buttons
-                els.joinBtns.forEach(b => {
-                    if (b.dataset.style === style) {
-                        b.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
-                        b.classList.remove('text-slate-500');
-                    } else {
-                        b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
-                        b.classList.add('text-slate-500');
-                    }
-                });
-            }
 
-            // Naming Convention Toggle
             els.nameRadios.forEach(radio => {
                 radio.addEventListener('change', (e) => {
                     state.namingMode = e.target.value;
-                    if (state.namingMode === 'custom') {
-                        els.customNameInput.classList.remove('hidden');
-                    } else {
-                        els.customNameInput.classList.add('hidden');
-                    }
+                    els.customNameInput.classList.toggle('hidden', state.namingMode !== 'custom');
                 });
             });
-            els.customNameInput.addEventListener('input', (e) => {
-                state.customName = e.target.value;
-            });
+            els.customNameInput.addEventListener('input', (e) => { state.customName = e.target.value; });
 
-            // Manual Edit Toggle
             els.manualEditToggle.addEventListener('change', (e) => {
                 state.isManualEditing = e.target.checked;
-                
-                // Auto-disable measure mode if enabling edit
                 if(state.isManualEditing && state.isMeasuring) {
-                    els.measureToggle.checked = false;
                     state.isMeasuring = false;
+                    els.measureToggle.checked = false; // Reset toggle UI
                     toggleMeasureMode();
                 }
-                
                 toggleEditMode();
             });
             
-            // Measure Toggle
+            // Measure Tool
             els.measureToggle.addEventListener('change', (e) => {
                 state.isMeasuring = e.target.checked;
-                
-                // Auto-disable edit mode if enabling measure
                 if(state.isMeasuring && state.isManualEditing) {
-                    els.manualEditToggle.checked = false;
                     state.isManualEditing = false;
+                    els.manualEditToggle.checked = false;
                     toggleEditMode();
                 }
-                
                 toggleMeasureMode();
             });
             
-            // Clear Measurements
-            els.btnClearMeasure.addEventListener('click', () => {
-                clearMeasurements();
+            els.btnUndoMeasure.addEventListener('click', undoMeasurement);
+            els.btnClearMeasure.addEventListener('click', clearMeasurements);
+            
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && state.isMeasuring) {
+                    state.isMeasuring = false;
+                    els.measureToggle.checked = false;
+                    toggleMeasureMode();
+                }
             });
 
+            // --- Helper Functions UI ---
+            function updateToggleUI(nodeList, activeNode) {
+                nodeList.forEach(b => {
+                    b.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                    b.classList.add('text-slate-500');
+                });
+                activeNode.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                activeNode.classList.remove('text-slate-500');
+            }
 
-            // --- 5. Core Logic ---
+            function toggleMethodOptions(method) {
+                if(method === 'scale') {
+                    els.gisOptionsContainer.classList.add('hidden');
+                    els.scaleOptionsContainer.classList.remove('hidden'); 
+                    els.methodDesc.className = "text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-amber-400 bg-amber-50 text-amber-700 leading-tight";
+                    els.methodDesc.innerHTML = "<i class='fa-solid fa-triangle-exclamation'></i> <b>Variable Distance:</b> Scaling preserves shape but the buffer width will vary (geometry rule).";
+                    updateScaleDescriptions(state.scaleMethod);
+                } else {
+                    els.gisOptionsContainer.classList.remove('hidden');
+                    els.cornerContainer.classList.remove('hidden');
+                    els.scaleOptionsContainer.classList.add('hidden');
+                    els.methodDesc.className = "text-[10px] mt-2 px-2 py-1 rounded border-l-2 border-blue-400 bg-blue-50 text-blue-700 leading-tight";
+                    els.methodDesc.innerHTML = "<i class='fa-solid fa-circle-check'></i> <b>Constant Distance:</b> Creates an exact uniform boundary everywhere.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(0)); 
+                }
+            }
 
+            function updateScaleDescriptions(method) {
+                if (method === 'factor') {
+                    els.scaleMethodDesc.innerText = "Multiplies size based on Shape Area. Preserves exact shape angles.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(1));
+                    els.centerDragTip.classList.remove('hidden');
+                    els.btnResetCenter.classList.remove('hidden');
+                    els.cornerContainer.classList.add('hidden');
+                } else if (method === 'radial') {
+                    els.scaleMethodDesc.innerText = "Pushes corners out so edges move exactly X meters (Miter Projection).";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(1));
+                    els.centerDragTip.classList.remove('hidden');
+                    els.btnResetCenter.classList.remove('hidden');
+                    els.cornerContainer.classList.add('hidden');
+                } else if (method === 'offset') {
+                    els.scaleMethodDesc.innerText = "Pushes boundaries outward by fixed distance (Buffer). Shape-preserving offset.";
+                    layers.debug.getLayers().forEach(l => l.setOpacity(0));
+                    els.centerDragTip.classList.add('hidden');
+                    els.btnResetCenter.classList.add('hidden');
+                    els.cornerContainer.classList.remove('hidden');
+                    if (state.edgeStyle !== 'sharp') setCornerStyle('sharp');
+                }
+            }
+
+            function updateBaseShapeDesc(shape) {
+                if (shape === 'exact') els.baseShapeDesc.innerText = "Follows every curve and corner of your original shape exactly.";
+                if (shape === 'envelope') els.baseShapeDesc.innerText = "Creates a simple rectangular box around your shape before buffering.";
+                if (shape === 'convex') els.baseShapeDesc.innerText = "Wraps a rubber band around your shape, ignoring inner cavities.";
+            }
+
+            // --- CORE LOGIC ---
             function processFile(file) {
                 state.originalFileName = file.name.replace('.kml', '');
                 const reader = new FileReader();
@@ -755,18 +838,12 @@
                     try {
                         const parser = new DOMParser();
                         const kml = parser.parseFromString(e.target.result, 'text/xml');
-                        const kmlParser = (window.toGeoJSON || window.togeojson); // Robust check
+                        const kmlParser = (window.toGeoJSON || window.togeojson); 
                         const geojson = kmlParser.kml(kml);
-                        
                         const polygons = geojson.features.filter(f => f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
-
-                        if (polygons.length === 0) {
-                            throw new Error("No Polygons found in KML (Points ignored)");
-                        }
-
-                        const cleanGeoJSON = turf.featureCollection(polygons);
-                        loadGeoJSON(cleanGeoJSON);
-                        showStatus(`Loaded: ${file.name} (${polygons.length} polygons)`);
+                        if (polygons.length === 0) throw new Error("No Polygons found");
+                        loadGeoJSON(turf.featureCollection(polygons));
+                        showStatus(`Loaded: ${file.name}`);
                     } catch (err) {
                         showStatus("Error: " + err.message, true);
                     }
@@ -776,43 +853,36 @@
 
             function loadDemoData() {
                 state.originalFileName = "Demo_Polygon";
-                // Create a simpler square for better "Sharp" vs "Round" demo
                 const polygon = turf.polygon([[
-                    [77.2090, 28.6139], 
-                    [77.2200, 28.6139], 
-                    [77.2200, 28.6250], 
-                    [77.2090, 28.6250], 
-                    [77.2090, 28.6139]
+                    [77.2090, 28.6139], [77.2200, 28.6139], [77.2200, 28.6250], [77.2090, 28.6250], [77.2090, 28.6139]
                 ]], { name: "Demo Polygon" });
                 loadGeoJSON(turf.featureCollection([polygon]));
             }
 
             function loadGeoJSON(geojson) {
                 state.originalGeoJSON = geojson;
-                
-                // Calculate Centroids and Store
                 state.featureCenters = geojson.features.map(f => turf.centroid(f));
                 initCenterMarkers();
-
                 els.controls.classList.remove('opacity-50', 'pointer-events-none');
                 els.legend.classList.remove('hidden');
-
                 layers.original.clearLayers();
                 layers.original.addData(state.originalGeoJSON);
-                
                 const bounds = layers.original.getBounds();
                 if(bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
-
-                // Setup Reference for Drag Handle (Standard Buffer)
+                
                 const firstPoly = state.originalGeoJSON.features[0];
                 const coords = turf.getCoords(firstPoly);
-                const rawPt = (firstPoly.geometry.type === 'MultiPolygon') ? coords[0][0][0] : coords[0][0];
-                state.referencePoint = turf.point(rawPt);
+                // Handle complex geometries for initial reference point
+                let rawPt;
+                if(firstPoly.geometry.type === 'MultiPolygon') {
+                     rawPt = coords[0][0][0]; 
+                } else {
+                     rawPt = coords[0][0];
+                }
                 
-                // For standard drag handle
+                state.referencePoint = turf.point(rawPt);
                 const center = turf.centroid(firstPoly);
                 state.referenceBearing = turf.bearing(center, state.referencePoint);
-
                 updateBuffer();
             }
             
@@ -820,20 +890,13 @@
                 layers.debug.clearLayers();
                 state.featureCenters.forEach((center, index) => {
                     const latlng = [center.geometry.coordinates[1], center.geometry.coordinates[0]];
-                    const marker = L.marker(latlng, { 
-                        icon: centerIcon, 
-                        draggable: true,
-                        title: "Drag to change expansion center" 
-                    }).addTo(layers.debug);
-                    
-                    // If not in Scale mode, hide them initially
+                    const marker = L.marker(latlng, { icon: centerIcon, draggable: true, title: "Drag to change expansion center" }).addTo(layers.debug);
                     if(state.method !== 'scale') marker.setOpacity(0);
-
                     marker.on('drag', (e) => {
                         const newLatLng = e.target.getLatLng();
                         const newCenter = turf.point([newLatLng.lng, newLatLng.lat]);
                         state.featureCenters[index] = newCenter;
-                        updateBuffer(); // Live Update
+                        updateBuffer();
                     });
                 });
             }
@@ -841,7 +904,6 @@
             // --- MITER OFFSET HELPER ---
             function calculateMiterOffset(feature, distance) {
                 const rewound = turf.rewind(feature, {reverse: false});
-                
                 const processRing = (ring) => {
                     const newRing = [];
                     const len = ring.length;
@@ -849,49 +911,46 @@
                         const curr = ring[i];
                         const prev = ring[i===0 ? len-2 : i-1];
                         const next = ring[i+1];
-                        
                         const pCurr = turf.point(curr);
                         const pPrev = turf.point(prev);
                         const pNext = turf.point(next);
-                        
                         const b1 = turf.bearing(pPrev, pCurr); 
                         const b2 = turf.bearing(pCurr, pNext); 
-                        
-                        const offsetAngle = 90; 
-                        const n1 = b1 + offsetAngle;
-                        const n2 = b2 + offsetAngle;
-                        
+                        const n1 = b1 + 90;
+                        const n2 = b2 + 90;
                         const rad1 = n1 * Math.PI / 180;
                         const rad2 = n2 * Math.PI / 180;
-                        
                         let bx = Math.cos(rad1) + Math.cos(rad2);
                         let by = Math.sin(rad1) + Math.sin(rad2);
-                        
                         const lenB = Math.sqrt(bx*bx + by*by);
-                        if (lenB < 0.001) {
-                            bx = Math.cos(rad1); by = Math.sin(rad1);
-                        } else {
-                            bx /= lenB; by /= lenB;
-                        }
-                        
+                        if (lenB < 0.001) { bx = Math.cos(rad1); by = Math.sin(rad1); } else { bx /= lenB; by /= lenB; }
                         const dot = bx*Math.cos(rad1) + by*Math.sin(rad1);
                         let miterDist = distance;
-                        if (Math.abs(dot) > 0.01) {
-                            miterDist = distance / dot;
-                        }
-                        
-                        const limit = distance * 3;
+                        if (Math.abs(dot) > 0.01) miterDist = distance / dot;
+                        const limit = Math.abs(distance) * 3; // Use abs of input distance for limit magnitude
                         if (Math.abs(miterDist) > limit) miterDist = limit * Math.sign(miterDist);
                         
-                        const bisectorBearing = Math.atan2(by, bx) * 180 / Math.PI;
-                        const dest = turf.destination(pCurr, Math.abs(miterDist), bisectorBearing, {units: state.bufferUnit});
+                        // For shrink, miterDist is negative. 
+                        // To shrink using turf.destination, we use Positive Dist and Reverse Bearing?
+                        // OR just rely on signed distance handling if we calculate vector manually?
+                        // Turf destination requires positive distance.
                         
+                        let finalDist = Math.abs(miterDist);
+                        
+                        // Bisector Angle
+                        let bisectorBearing = Math.atan2(by, bx) * 180 / Math.PI;
+                        
+                        // If miterDist is negative (shrink), flip bearing 180 deg
+                        if(miterDist < 0) {
+                            bisectorBearing = (bisectorBearing + 180) % 360;
+                        }
+                        
+                        const dest = turf.destination(pCurr, finalDist, bisectorBearing, {units: state.bufferUnit});
                         newRing.push(dest.geometry.coordinates);
                     }
                     newRing.push(newRing[0]); 
                     return newRing;
                 };
-                
                 let newCoords = [];
                 if(rewound.geometry.type === "Polygon") {
                     newCoords = rewound.geometry.coordinates.map(processRing);
@@ -902,104 +961,108 @@
                 }
                 return rewound;
             }
+            
+            function getDistanceInMeters(distance, unit) {
+                 if(unit === 'kilometers') return distance * 1000;
+                 if(unit === 'miles') return distance * 1609.34;
+                 if(unit === 'feet') return distance * 0.3048;
+                 return distance;
+            }
+            
+            // --- CLEAN GEOMETRY FUNCTION ---
+            function cleanGeometry(geoJSON) {
+                if (!state.isAutoRepair) return geoJSON;
+                
+                let cleanFeatures = [];
+                const features = geoJSON.type === 'FeatureCollection' ? geoJSON.features : [geoJSON];
+                
+                features.forEach(f => {
+                    // Try to unkink
+                    try {
+                        if(f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
+                            const unkinked = turf.unkinkPolygon(f);
+                            cleanFeatures.push(...unkinked.features);
+                        } else {
+                            cleanFeatures.push(f);
+                        }
+                    } catch(e) {
+                        console.warn("Unkink failed for feature, keeping original", e);
+                        cleanFeatures.push(f);
+                    }
+                });
+                
+                return turf.featureCollection(cleanFeatures);
+            }
 
             function updateBuffer() {
                 if (!state.originalGeoJSON) return;
-
                 try {
-                    // UI Sync
-                    els.sliderVal.innerText = `${Math.round(state.bufferDistance)} ${getUnitAbbr(state.bufferUnit)}`;
+                    const signedDistance = state.bufferDistance * state.bufferDirection;
+                    els.sliderVal.innerText = `${Math.round(state.bufferDistance)} ${getUnitAbbr(state.bufferUnit)} ${state.bufferDirection < 0 ? '(In)' : ''}`;
                     
                     let bufferedFeatures = [];
-
                     if (state.method === 'scale') {
-                        // --- SCALE METHOD ---
-                        
                         bufferedFeatures = state.originalGeoJSON.features.map((f, i) => {
-                            // Use Custom Center if available
                             const center = state.featureCenters[i] || turf.centroid(f);
-
                             if (state.scaleMethod === 'radial') {
-                                // --- VERTEX RADIAL ---
-                                const processRing = (ring) => {
-                                    return ring.map(coord => {
-                                        const pt = turf.point(coord);
-                                        const bearing = turf.bearing(center, pt);
-                                        const currentDist = turf.distance(center, pt, {units: state.bufferUnit});
-                                        const newPt = turf.destination(center, currentDist + state.bufferDistance, bearing, {units: state.bufferUnit});
-                                        return newPt.geometry.coordinates;
-                                    });
-                                };
-
-                                let newCoordinates = [];
-                                if (f.geometry.type === "Polygon") {
-                                    newCoordinates = f.geometry.coordinates.map(processRing);
-                                    return turf.polygon(newCoordinates, f.properties);
-                                } else if (f.geometry.type === "MultiPolygon") {
-                                    newCoordinates = f.geometry.coordinates.map(poly => poly.map(processRing));
-                                    return turf.multiPolygon(newCoordinates, f.properties);
-                                }
-                                return f; 
-
+                                // Miter Offset supports signed distance
+                                return calculateMiterOffset(f, signedDistance);
                             } else if (state.scaleMethod === 'offset') {
-                                // --- OFFSET (Standard Buffer OR Manual Miter) ---
-                                if (state.edgeStyle === 'sharp') {
-                                    return calculateMiterOffset(f, state.bufferDistance);
-                                } else {
-                                    let steps = 64;
-                                    if (state.edgeStyle === 'square') steps = 1;
-                                    return turf.buffer(f, state.bufferDistance, { 
-                                        units: state.bufferUnit, 
-                                        steps: steps 
-                                    });
-                                }
-
+                                // If Sharp, use manual miter. Else use Turf (supports neg)
+                                if (state.edgeStyle === 'sharp') return calculateMiterOffset(f, signedDistance);
+                                let steps = 64; if (state.edgeStyle === 'square') steps = 1;
+                                return turf.buffer(f, signedDistance, { units: state.bufferUnit, steps: steps });
                             } else {
-                                // --- CENTROID FACTOR (BBox Logic) ---
-                                const bbox = turf.bbox(f);
-                                const sw = turf.point([bbox[0], bbox[1]]);
-                                const se = turf.point([bbox[2], bbox[1]]);
-                                const nw = turf.point([bbox[0], bbox[3]]);
-                                const width = turf.distance(sw, se, {units: state.bufferUnit});
-                                const height = turf.distance(sw, nw, {units: state.bufferUnit});
-                                const avgDim = (width + height) / 2;
-
-                                const baseDim = avgDim || 1;
-                                const scaleFactor = (baseDim + (2 * state.bufferDistance)) / baseDim;
+                                // FIXED: Use SQRT AREA logic
+                                const area = turf.area(f); 
+                                const charLength = Math.sqrt(area); 
+                                const distMeters = getDistanceInMeters(signedDistance, state.bufferUnit); // signed
+                                
+                                // Scale Factor for shrink
+                                let scaleFactor = (charLength + (2 * distMeters)) / charLength;
+                                if (scaleFactor < 0.001) scaleFactor = 0.001; // Clamp to point
                                 
                                 return turf.transformScale(f, scaleFactor, { origin: center });
                             }
                         });
-
                     } else {
-                        // --- STANDARD BUFFER METHOD ---
                         layers.debug.getLayers().forEach(l => l.setOpacity(0)); 
-                        
                         const baseGeoms = state.originalGeoJSON.features.map(f => {
-                            if (state.baseShape === 'envelope') {
-                                return turf.bboxPolygon(turf.bbox(f));
-                            } else if (state.baseShape === 'convex') {
-                                const hull = turf.convex(f);
-                                return hull ? hull : f; 
-                            }
+                            if (state.baseShape === 'envelope') return turf.bboxPolygon(turf.bbox(f));
+                            if (state.baseShape === 'convex') return turf.convex(f) || f;
                             return f; 
                         });
-
-                        let steps = 64;
-                        if (state.edgeStyle === 'sharp') steps = 3;
-                        if (state.edgeStyle === 'square') steps = 1;
-
-                        bufferedFeatures = baseGeoms.map(geom => {
-                            return turf.buffer(geom, state.bufferDistance, {
-                                units: state.bufferUnit,
-                                steps: steps
-                            });
-                        });
+                        let steps = 64; if (state.edgeStyle === 'sharp') steps = 3; if (state.edgeStyle === 'square') steps = 1;
+                        bufferedFeatures = baseGeoms.map(geom => turf.buffer(geom, signedDistance, { units: state.bufferUnit, steps: steps }));
                     }
 
-                    state.bufferedGeoJSON = turf.featureCollection(bufferedFeatures);
+                    // --- INTEGRITY CHECK STEP ---
+                    let rawBufferFC = turf.featureCollection(bufferedFeatures);
+                    state.bufferedGeoJSON = cleanGeometry(rawBufferFC);
 
                     layers.buffer.clearLayers();
+                    
+                    // Styling for Inward
+                    if (state.bufferDirection < 0) {
+                         layers.original.bringToBack();
+                         layers.buffer.setStyle({ 
+                            color: "#00007f", 
+                            weight: 2, 
+                            dashArray: '5, 5', 
+                            fillColor: '#ffffff', 
+                            fillOpacity: 0.1 
+                        });
+                        layers.buffer.bringToFront();
+                    } else {
+                        layers.buffer.setStyle({ 
+                            color: "#00007f", 
+                            weight: 2, 
+                            dashArray: '5, 5', 
+                            fillColor: 'transparent', 
+                            fillOpacity: 0 
+                        });
+                    }
+                    
                     layers.buffer.addData(state.bufferedGeoJSON);
                     
                     if (state.isManualEditing) {
@@ -1016,11 +1079,9 @@
             
             function calculateStats() {
                 if(!state.originalGeoJSON || !state.bufferedGeoJSON) return;
-                
                 const origSqM = turf.area(state.originalGeoJSON);
                 const newSqM = turf.area(state.bufferedGeoJSON);
                 const diffSqM = newSqM - origSqM;
-
                 updateStatsUI(origSqM, newSqM, diffSqM);
             }
 
@@ -1030,25 +1091,27 @@
                 els.origSqm.innerText = fmt(orig);
                 els.newHa.innerText = toHectares(newArea);
                 els.newSqm.innerText = fmt(newArea);
-                els.diffHa.innerText = "+" + toHectares(diff);
-                els.diffSqm.innerText = "+" + fmt(diff);
+                
+                // Visual feedback for negative
+                const diffSign = diff >= 0 ? "+" : "";
+                els.diffHa.innerText = diffSign + toHectares(diff);
+                els.diffSqm.innerText = diffSign + fmt(diff);
+                
+                const colorClass = diff >= 0 ? "text-green-600" : "text-red-600";
+                els.diffHa.className = `text-sm font-bold ${colorClass}`;
+                els.diffSqm.className = `text-[10px] opacity-80 ${colorClass}`;
             }
             
-            // --- Manual Editing ---
+            // --- Manual Editing & Measure (Existing) ---
             function toggleEditMode() {
                 if (state.isManualEditing) {
-                    els.manualEditWarning.classList.remove('hidden');
-                    els.dragHint.classList.add('hidden'); 
                     layers.handle.clearLayers(); 
                     enableGeomanOnLayer();
                 } else {
-                    els.manualEditWarning.classList.add('hidden');
-                    els.dragHint.classList.remove('hidden');
                     disableGeomanOnLayer();
                     updateDragHandle();
                 }
             }
-            
             function enableGeomanOnLayer() {
                 layers.buffer.eachLayer(layer => {
                     layer.pm.enable({ allowSelfIntersection: true, preventMarkerRemoval: false });
@@ -1058,7 +1121,6 @@
                     layer.on('pm:remove', handleManualEdit);
                 });
             }
-            
             function disableGeomanOnLayer() {
                 layers.buffer.eachLayer(layer => {
                     layer.pm.disable();
@@ -1066,30 +1128,42 @@
                     layer.off('pm:dragend', handleManualEdit);
                 });
             }
-            
             function handleManualEdit(e) {
                 const updatedGeoJSON = layers.buffer.toGeoJSON();
                 state.bufferedGeoJSON = updatedGeoJSON;
                 calculateStats();
             }
 
-            // --- MEASURE TOOL FUNCTIONS ---
+            // --- MEASURE TOOL (Reverted to Sidebar Logic) ---
             let tempMeasureLine = null;
+            let cursorTooltip = null;
             
             function toggleMeasureMode() {
                 if(state.isMeasuring) {
+                    // Activate
                     els.measureStats.classList.remove('hidden');
-                    map.getContainer().classList.add('measuring-cursor');
+                    map.getContainer().classList.add('measure-cursor');
                     map.on('click', handleMeasureClick);
                     map.on('mousemove', handleMeasureMove);
-                    map.on('dblclick', endMeasurement); 
+                    map.on('contextmenu', endMeasurement); // Right click to finish
+                    els.measureTotal.innerText = "0 m";
                 } else {
+                    // Deactivate
                     els.measureStats.classList.add('hidden');
-                    map.getContainer().classList.remove('measuring-cursor');
+                    map.getContainer().classList.remove('measure-cursor');
                     map.off('click', handleMeasureClick);
                     map.off('mousemove', handleMeasureMove);
-                    map.off('dblclick', endMeasurement);
-                    clearMeasurements(); 
+                    map.off('contextmenu', endMeasurement);
+                    
+                    if(cursorTooltip) {
+                        cursorTooltip.remove();
+                        cursorTooltip = null;
+                    }
+                    if(tempMeasureLine) {
+                        layers.measure.removeLayer(tempMeasureLine);
+                        tempMeasureLine = null;
+                    }
+                    clearMeasurements();
                 }
             }
             
@@ -1097,53 +1171,151 @@
                 const latlng = e.latlng;
                 state.measurePoints.push(latlng);
                 
-                const marker = L.circleMarker(latlng, {
-                    color: '#2563eb',
+                L.circleMarker(latlng, {
+                    color: '#4f46e5',
                     fillColor: '#fff',
                     fillOpacity: 1,
                     radius: 4,
-                    weight: 2
+                    weight: 2,
+                    interactive: false
                 }).addTo(layers.measure);
                 
-                let totalDist = 0;
-                let segmentDist = 0;
                 if(state.measurePoints.length > 1) {
                     const prev = state.measurePoints[state.measurePoints.length - 2];
-                    segmentDist = prev.distanceTo(latlng);
+                    const dist = prev.distanceTo(latlng);
                     
-                    for(let i=1; i<state.measurePoints.length; i++) {
-                        totalDist += state.measurePoints[i-1].distanceTo(state.measurePoints[i]);
-                    }
-                    
+                    // Add Line
                     L.polyline([prev, latlng], {
-                        color: '#2563eb',
-                        dashArray: '6, 6',
-                        weight: 2
+                        color: '#4f46e5', 
+                        weight: 2,
+                        interactive: false
                     }).addTo(layers.measure);
+
+                    // Add Segment Label at Midpoint
+                    const midLat = (prev.lat + latlng.lat) / 2;
+                    const midLng = (prev.lng + latlng.lng) / 2;
+                    L.tooltip({
+                        permanent: true,
+                        direction: 'center',
+                        className: 'segment-label'
+                    })
+                    .setLatLng([midLat, midLng])
+                    .setContent(formatDistance(dist))
+                    .addTo(layers.measure);
                 }
                 
-                let label = totalDist === 0 ? "Start" : `${formatDistance(totalDist)} (+${formatDistance(segmentDist)})`;
-                marker.bindTooltip(label, { permanent: true, direction: 'right', className: 'measure-tooltip' }).openTooltip();
-                
-                els.measureTotal.innerText = formatDistance(totalDist);
+                updateMeasureStats();
             }
             
             function handleMeasureMove(e) {
-                if(state.measurePoints.length === 0) return;
+                const currentPoint = e.latlng;
+                
+                if(!cursorTooltip) {
+                    cursorTooltip = L.tooltip({
+                        permanent: true,
+                        direction: 'right',
+                        offset: [15, 0],
+                        className: 'cursor-tooltip'
+                    }).setLatLng(currentPoint).addTo(map);
+                } else {
+                    cursorTooltip.setLatLng(currentPoint);
+                }
+                
+                if(state.measurePoints.length === 0) {
+                    cursorTooltip.setContent("Click to start measuring");
+                    return;
+                }
                 
                 const lastPoint = state.measurePoints[state.measurePoints.length - 1];
-                const currentPoint = e.latlng;
+                const segmentDist = lastPoint.distanceTo(currentPoint);
                 
                 if(tempMeasureLine) {
                     tempMeasureLine.setLatLngs([lastPoint, currentPoint]);
                 } else {
                     tempMeasureLine = L.polyline([lastPoint, currentPoint], {
-                        color: '#2563eb',
-                        dashArray: '4, 8',
-                        weight: 1,
-                        opacity: 0.6
+                        color: '#6366f1', 
+                        dashArray: '5, 5',
+                        weight: 2,
+                        opacity: 0.6,
+                        interactive: false
                     }).addTo(layers.measure);
                 }
+                
+                let totalSoFar = calculateTotalDistance() + segmentDist;
+                cursorTooltip.setContent(`Total: ${formatDistance(totalSoFar)} (+${formatDistance(segmentDist)})`);
+            }
+            
+            function calculateTotalDistance() {
+                let total = 0;
+                for(let i=1; i<state.measurePoints.length; i++) {
+                    total += state.measurePoints[i-1].distanceTo(state.measurePoints[i]);
+                }
+                return total;
+            }
+
+            function updateMeasureStats() {
+                const total = calculateTotalDistance();
+                els.measureTotal.innerText = formatDistance(total);
+            }
+            
+            function undoMeasurement() {
+                if(state.measurePoints.length === 0) return;
+                
+                // Remove last point state
+                state.measurePoints.pop();
+                
+                // Clear and redraw
+                const wasTempLine = tempMeasureLine;
+                const wasTooltip = cursorTooltip;
+                
+                layers.measure.clearLayers();
+                
+                // Redraw Points & Lines & Labels
+                state.measurePoints.forEach((pt, i) => {
+                     L.circleMarker(pt, {
+                        color: '#2563eb',
+                        fillColor: '#fff',
+                        fillOpacity: 1,
+                        radius: 4,
+                        weight: 2,
+                        interactive: false
+                    }).addTo(layers.measure);
+                    
+                    if(i > 0) {
+                        const prev = state.measurePoints[i-1];
+                        const dist = prev.distanceTo(pt);
+                        
+                        L.polyline([prev, pt], {
+                            color: '#2563eb', 
+                            weight: 2,
+                            interactive: false
+                        }).addTo(layers.measure);
+                        
+                        // Redraw Label
+                        const midLat = (prev.lat + pt.lat) / 2;
+                        const midLng = (prev.lng + pt.lng) / 2;
+                        L.tooltip({
+                            permanent: true,
+                            direction: 'center',
+                            className: 'segment-label'
+                        })
+                        .setLatLng([midLat, midLng])
+                        .setContent(formatDistance(dist))
+                        .addTo(layers.measure);
+                    }
+                });
+                
+                // Restore interactive elements if active
+                if(wasTempLine) {
+                    tempMeasureLine = wasTempLine;
+                    tempMeasureLine.addTo(layers.measure);
+                }
+                if(wasTooltip) {
+                    cursorTooltip = wasTooltip;
+                    cursorTooltip.addTo(map);
+                }
+                
+                updateMeasureStats();
             }
             
             function endMeasurement() {
@@ -1151,13 +1323,27 @@
                     layers.measure.removeLayer(tempMeasureLine);
                     tempMeasureLine = null;
                 }
+                if(cursorTooltip) {
+                    cursorTooltip.remove();
+                    cursorTooltip = null;
+                }
+                map.off('mousemove', handleMeasureMove);
             }
             
             function clearMeasurements() {
                 state.measurePoints = [];
                 layers.measure.clearLayers();
-                if(tempMeasureLine) tempMeasureLine = null;
+                if(tempMeasureLine) {
+                    layers.measure.removeLayer(tempMeasureLine);
+                    tempMeasureLine = null;
+                }
                 els.measureTotal.innerText = "0 m";
+                
+                if(state.isMeasuring) {
+                    if(cursorTooltip) cursorTooltip.setContent("Click to start measuring");
+                    map.off('mousemove', handleMeasureMove);
+                    map.on('mousemove', handleMeasureMove);
+                }
             }
             
             function formatDistance(meters) {
@@ -1192,7 +1378,7 @@
                 layers.handle.clearLayers();
                 if(!state.referencePoint) return;
 
-                const handlePos = turf.destination(state.referencePoint, state.bufferDistance, state.referenceBearing, { units: state.bufferUnit });
+                const handlePos = turf.destination(state.referencePoint, state.bufferDistance * state.bufferDirection, state.referenceBearing, { units: state.bufferUnit });
                 const latlng = [handlePos.geometry.coordinates[1], handlePos.geometry.coordinates[0]];
                 
                 const marker = L.marker(latlng, { draggable: true, icon: handleIcon }).addTo(layers.handle);
@@ -1203,11 +1389,14 @@
                 marker.on('drag', (e) => {
                     const newLatLng = e.target.getLatLng();
                     const newPt = turf.point([newLatLng.lng, newLatLng.lat]);
-                    const dist = turf.distance(state.referencePoint, newPt, { units: state.bufferUnit });
+                    
+                    // Always calculate positive distance from reference
+                    let dist = turf.distance(state.referencePoint, newPt, { units: state.bufferUnit });
+                    
                     state.bufferDistance = dist;
                     els.distanceInput.value = dist.toFixed(2);
                     els.distanceSlider.value = dist;
-                    els.sliderVal.innerText = `${Math.round(dist)} ${getUnitAbbr(state.bufferUnit)}`;
+                    els.sliderVal.innerText = `${Math.round(dist)} ${getUnitAbbr(state.bufferUnit)} ${state.bufferDirection < 0 ? '(In)' : ''}`;
                     marker.setTooltipContent(`${Math.round(dist)}${getUnitAbbr(state.bufferUnit)}`);
                 });
 
@@ -1267,15 +1456,21 @@
                 };
 
                 let kmlPlacemarks = "";
-
+                
+                // Aggregate all buffer features into one MultiGeometry placemark
+                let multiGeomXml = "<MultiGeometry>";
                 state.bufferedGeoJSON.features.forEach(feature => {
-                    kmlPlacemarks += `
-                    <Placemark>
-                        <name>${polygonName}</name>
-                        <styleUrl>#bufferStyle</styleUrl>
-                        ${featureToKMLGeometry(feature)}
-                    </Placemark>`;
+                     multiGeomXml += featureToKMLGeometry(feature).replace("<MultiGeometry>", "").replace("</MultiGeometry>", ""); 
                 });
+                multiGeomXml += "</MultiGeometry>";
+                
+                // Use a single placemark for the buffer
+                kmlPlacemarks += `
+                <Placemark>
+                    <name>${polygonName}</name>
+                    <styleUrl>#bufferStyle</styleUrl>
+                    ${multiGeomXml}
+                </Placemark>`;
 
                 if (els.includeOriginal.checked && state.originalGeoJSON) {
                     const origName = `Original ${state.originalFileName}`;
@@ -1357,7 +1552,6 @@
                 state.bufferedGeoJSON = null;
                 state.isManualEditing = false;
                 els.manualEditToggle.checked = false;
-                els.manualEditWarning.classList.add('hidden');
                 
                 // Reset measure state
                 state.isMeasuring = false;
