@@ -930,11 +930,6 @@
                         const limit = Math.abs(distance) * 3; // Use abs of input distance for limit magnitude
                         if (Math.abs(miterDist) > limit) miterDist = limit * Math.sign(miterDist);
                         
-                        // For shrink, miterDist is negative. 
-                        // To shrink using turf.destination, we use Positive Dist and Reverse Bearing?
-                        // OR just rely on signed distance handling if we calculate vector manually?
-                        // Turf destination requires positive distance.
-                        
                         let finalDist = Math.abs(miterDist);
                         
                         // Bisector Angle
@@ -1427,48 +1422,73 @@
                     polygonName = `${distLabel} BUFFERZONE`;
                 }
 
-                const lineColor = "ff7f0000"; 
+                // KML Color Format: AABBGGRR (Alpha, Blue, Green, Red)
+                // Line: Solid Red (Opacity FF, Blue 00, Green 00, Red FF) -> ff0000ff
+                const lineKmlColor = "ff7f0000";
                 
-                const featureToKMLGeometry = (feature) => {
+                // Poly: Almost Transparent White (Opacity 01, Blue ff, Green ff, Red ff) -> 01ffffff
+                // This ensures area is calculated by Google Earth but visual is clean
+                const fillKmlColor = "01ffffff";
+
+                // --- Improved Helper to return ARRAY of polygon XML strings ---
+                const getPolygonXMLs = (feature) => {
                     const processRing = (ring) => ring.map(coord => `${coord[0]},${coord[1]},0`).join(" ");
+                    
+                    const createPolyTag = (coords) => {
+                         const outerRing = processRing(coords[0]);
+                         let innerRings = "";
+                         for(let i=1; i<coords.length; i++) {
+                             innerRings += `<innerBoundaryIs><LinearRing><coordinates>${processRing(coords[i])}</coordinates></LinearRing></innerBoundaryIs>`;
+                         }
+                         return `<Polygon><outerBoundaryIs><LinearRing><coordinates>${outerRing}</coordinates></LinearRing></outerBoundaryIs>${innerRings}</Polygon>`;
+                    };
+
                     if (feature.geometry.type === "Polygon") {
-                        const outerRing = processRing(feature.geometry.coordinates[0]);
-                        let innerRings = "";
-                        for(let i=1; i<feature.geometry.coordinates.length; i++) {
-                            innerRings += `<innerBoundaryIs><LinearRing><coordinates>${processRing(feature.geometry.coordinates[i])}</coordinates></LinearRing></innerBoundaryIs>`;
-                        }
-                        return `<Polygon><outerBoundaryIs><LinearRing><coordinates>${outerRing}</coordinates></LinearRing></outerBoundaryIs>${innerRings}</Polygon>`;
+                        return [createPolyTag(feature.geometry.coordinates)];
                     } else if (feature.geometry.type === "MultiPolygon") {
-                        let mpXml = "<MultiGeometry>";
-                        feature.geometry.coordinates.forEach(polyCoords => {
-                            const outerRing = processRing(polyCoords[0]);
-                            let innerRings = "";
-                            for(let i=1; i<polyCoords.length; i++) {
-                                innerRings += `<innerBoundaryIs><LinearRing><coordinates>${processRing(polyCoords[i])}</coordinates></LinearRing></innerBoundaryIs>`;
-                            }
-                            mpXml += `<Polygon><outerBoundaryIs><LinearRing><coordinates>${outerRing}</coordinates></LinearRing></outerBoundaryIs>${innerRings}</Polygon>`;
-                        });
-                        mpXml += "</MultiGeometry>";
-                        return mpXml;
+                        return feature.geometry.coordinates.map(coords => createPolyTag(coords));
                     }
-                    return "";
+                    return [];
+                };
+                
+                // Helper that wraps the result for simple cases (like Original Geo)
+                const featureToKMLString = (feature) => {
+                    const parts = getPolygonXMLs(feature);
+                    if (parts.length === 0) return "";
+                    if (parts.length === 1) return parts[0];
+                    return `<MultiGeometry>${parts.join("")}</MultiGeometry>`;
                 };
 
                 let kmlPlacemarks = "";
                 
-                // Aggregate all buffer features into one MultiGeometry placemark
-                let multiGeomXml = "<MultiGeometry>";
+                // --- BUFFER GEOMETRY LOGIC (The Main Fix) ---
+                // Collect ALL parts from ALL buffered features
+                let allBufferParts = [];
                 state.bufferedGeoJSON.features.forEach(feature => {
-                     multiGeomXml += featureToKMLGeometry(feature).replace("<MultiGeometry>", "").replace("</MultiGeometry>", ""); 
+                    allBufferParts = allBufferParts.concat(getPolygonXMLs(feature));
                 });
-                multiGeomXml += "</MultiGeometry>";
                 
-                // Use a single placemark for the buffer
+                // Decide on wrapping
+                let bufferGeometryXml = "";
+                if (allBufferParts.length === 1) {
+                    // Single Polygon: Unwrap it so Google Earth measures Area automatically
+                    bufferGeometryXml = allBufferParts[0];
+                } else {
+                    // Multiple Polygons: Wrap in MultiGeometry
+                    bufferGeometryXml = `<MultiGeometry>${allBufferParts.join("")}</MultiGeometry>`;
+                }
+                
+                // Calculate Area for Description
+                const totalAreaSqM = turf.area(state.bufferedGeoJSON);
+                const totalAreaHa = (totalAreaSqM / 10000).toFixed(4);
+                const areaDesc = `Area: ${Math.round(totalAreaSqM).toLocaleString()} m² (${totalAreaHa} HA)`;
+                
                 kmlPlacemarks += `
                 <Placemark>
                     <name>${polygonName}</name>
+                    <description>${areaDesc}</description>
                     <styleUrl>#bufferStyle</styleUrl>
-                    ${multiGeomXml}
+                    ${bufferGeometryXml}
                 </Placemark>`;
 
                 if (els.includeOriginal.checked && state.originalGeoJSON) {
@@ -1478,26 +1498,26 @@
                         <Placemark>
                             <name>${origName}</name>
                             <styleUrl>#originalStyle</styleUrl>
-                            ${featureToKMLGeometry(feature)}
+                            ${featureToKMLString(feature)}
                         </Placemark>`;
                     });
                 }
 
                 const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
-    <kml xmlns="http://www.opengis.net/kml/2.2">
-    <Document>
-        <Style id="bufferStyle">
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+    <Style id="bufferStyle">
         <LineStyle>
-            <color>${lineColor}</color>
-            <width>2</width>
+            <color>${lineKmlColor}</color>
+            <width>3</width>
         </LineStyle>
         <PolyStyle>
-            <fill>0</fill>
+            <fill>1</fill>
             <outline>1</outline>
-            <color>${lineColor}</color>
+            <color>${fillKmlColor}</color>
         </PolyStyle>
-        </Style>
-        <Style id="originalStyle">
+    </Style>
+    <Style id="originalStyle">
         <LineStyle>
             <color>fff6823b</color>
             <width>2</width>
@@ -1506,13 +1526,13 @@
             <fill>0</fill>
             <outline>1</outline>
         </PolyStyle>
-        </Style>
-        <Folder>
+    </Style>
+    <Folder>
         <name>${fileName}</name>
         ${kmlPlacemarks}
-        </Folder>
-    </Document>
-    </kml>`;
+    </Folder>
+</Document>
+</kml>`;
 
                 const blob = new Blob([kmlContent], { type: 'application/vnd.google-earth.kml+xml' });
                 const url = URL.createObjectURL(blob);
